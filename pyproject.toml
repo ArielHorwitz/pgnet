@@ -1,0 +1,35 @@
+[build-system]
+requires = [
+  "setuptools>=61.0",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pgnet"
+description = "A server-client framework for games written in Python."
+version = "0.0.1"
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Natural Language :: English",
+  "Intended Audience :: Developers",
+]
+dependencies = [
+  "aioconsole==0.5.1",
+  "arrow==1.2.3",
+  "loguru==0.6.0",
+  "websockets==10.4",
+]
+
+[tool.setuptools.packages.find]
+include = [
+  "pgnet",
+]
+
+[project.scripts]
+pgnet = "pgnet.devclient:run"
