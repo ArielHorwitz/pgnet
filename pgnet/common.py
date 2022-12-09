@@ -4,6 +4,8 @@ from typing import Optional
 import arrow
 import json
 from dataclasses import dataclass, field
+import nacl.public
+from nacl.encoding import Base64Encoder
 
 
 DEFAULT_PORT = 38929
@@ -24,6 +26,11 @@ class DisconnectedError(Exception):
     It is expected that the cause of the error is passed as the first
     argument as a string.
     """
+    pass
+
+
+class CipherError(Exception):
+    """Raised when failing to encrypt plaintext or decrypt ciphertext."""
     pass
 
 
@@ -89,6 +96,52 @@ class Response:
     def debug_repr(self) -> str:
         """Repr with more data."""
         return f"{self!r}+{self.payload}"
+
+
+class CryptoKey:
+    """A key manager for end to end encryption.
+
+    By generating a pair of CryptoKey instances and each sharing their public
+    key with the other, they can encrypt and decrypt messages for each other.
+    """
+
+    def __init__(self):
+        """See class documentation for details."""
+        self._private_key = nacl.public.PrivateKey.generate()
+        self._public_key = self._private_key.public_key
+        self._boxes: dict[str, nacl.public.Box] = {}
+
+    @property
+    def pubkey(self) -> str:
+        """The public key in string format."""
+        return self._public_key.encode(encoder=Base64Encoder).decode()
+
+    def _get_box(self, pubkey: str) -> nacl.public.Box:
+        box = self._boxes.get(pubkey)
+        if not box:
+            pub = nacl.public.PublicKey(pubkey.encode(), encoder=Base64Encoder)
+            box = self._boxes[pubkey] = nacl.public.Box(self._private_key, pub)
+        return box
+
+    def encrypt(self, pubkey: str, plaintext: str) -> str:
+        """Encrypt a message for the given public key."""
+        box = self._get_box(pubkey)
+        try:
+            encrypted_message = box.encrypt(plaintext.encode(), encoder=Base64Encoder)
+            ciphertext = encrypted_message.decode()
+        except Exception as e:
+            raise CipherError("Failed to encrypt the plaintext.") from e
+        return ciphertext
+
+    def decrypt(self, pubkey: str, ciphertext: str) -> str:
+        """Decrypt a message from the given public key."""
+        box = self._get_box(pubkey)
+        try:
+            ciphertext = ciphertext.encode()
+            plaintext = box.decrypt(ciphertext, encoder=Base64Encoder).decode()
+        except Exception as e:
+            raise CipherError("Failed to decrypt the ciphertext.") from e
+        return plaintext
 
 
 class BaseGame:

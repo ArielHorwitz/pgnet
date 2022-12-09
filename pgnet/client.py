@@ -18,6 +18,8 @@ from websockets.client import WebSocketClientProtocol as ClientWebSocket
 from .common import (
     Packet,
     Response,
+    CryptoKey,
+    CipherError,
     DEFAULT_PORT,
     DisconnectedError,
     REQUEST_GAME_DIR,
@@ -67,6 +69,7 @@ class BaseClient:
             reconnect_cooldown: Seconds before trying to reconnect.
             max_reconnect_attempts: Number of times to try to reconnect.
         """
+        self._key: CryptoKey = CryptoKey()
         self._status: str = "New client."
         self.__do_close: bool = True
         self.__connected: bool = False
@@ -119,7 +122,8 @@ class BaseClient:
                 except OSError as e:
                     raise DisconnectedError("Failed to call server.", e)
                 self._set_connection(True)
-                await self._handle_handshake(websocket)
+                pubkey = await self._handle_key_trade(websocket)
+                await self._handle_handshake(websocket, pubkey)
                 reconnect_attempts = 0
                 self._websocket = websocket
                 await self._handle_user_connection(
@@ -129,6 +133,9 @@ class BaseClient:
                 )
             except DisconnectedError as e:
                 logger.info(repr(e))
+                self._set_status(f"Disconnected: {e.args[0]}")
+            except CipherError as e:
+                logger.debug(f"{e=}")
                 self._set_status(f"Disconnected: {e.args[0]}")
             self._websocket = None
             if websocket:
@@ -219,12 +226,18 @@ class BaseClient:
             logger.debug(f"Discarding messages:  {self.__packet_queue}")
         self.__packet_queue = []
 
-    @property
-    def websocket_busy(self) -> bool:
-        """Determine if the client is currently sending and receiving a message."""
-        return self._websocket_busy
+    async def _handle_key_trade(self, websocket: ClientWebSocket) -> str:
+        packet = Packet("key_trade", dict(pubkey=self._key.pubkey))
+        logger.debug(f"{packet.debug_repr=}")
+        response = await self._async_send(websocket, packet)
+        logger.debug(f"{response.debug_repr=}")
+        pubkey = response.payload.get("pubkey")
+        if not pubkey or not isinstance(pubkey, str):
+            raise DisconnectedError("Missing public key string from server.")
+        logger.debug(f"{pubkey=}")
+        return pubkey
 
-    async def _handle_handshake(self, websocket: ClientWebSocket):
+    async def _handle_handshake(self, websocket: ClientWebSocket, pubkey: str):
         """Handle a new connection by logging in with the handshake sequence."""
         self._set_status(f"Handshaking with {self.full_address}", logger.info)
         while True:
@@ -233,7 +246,7 @@ class BaseClient:
                 password=self.password,
             )
             packet = Packet("handshake", payload)
-            response = await self._async_send(websocket, packet)
+            response = await self._async_send(websocket, packet, pubkey=pubkey)
             if response.status == STATUS_OK:
                 logger.debug(f"Handshake success: {response.message}")
                 self._set_status(f"Connected to: {self.full_address}", logger.info)
@@ -246,24 +259,6 @@ class BaseClient:
             logger.info(response.message)
             self._set_status(response.message)
             await asyncio.sleep(self.reconnect_cooldown)
-
-    async def _async_update_games_dir(self):
-        """Update the games directory."""
-        if not self.connected:
-            logger.warning(
-                "Cannot async update games directory when disconnected.",
-            )
-            return
-        games_dir_response = await self._async_send(
-            self._websocket,
-            Packet(REQUEST_GAME_DIR),
-        )
-        self._on_games_dir(games_dir_response)
-
-    def _on_games_dir(self, response: Response):
-        self.__games_dir = response.payload.get("games", {})
-        if self.on_games_dir:
-            self.on_games_dir(self.__games_dir)
 
     async def _handle_user_connection(
         self,
@@ -300,6 +295,24 @@ class BaseClient:
                 self.on_game(self.__game)
             self._set_status(f"Joined game: {self.__game}")
             return
+
+    async def _async_update_games_dir(self):
+        """Update the games directory."""
+        if not self.connected:
+            logger.warning(
+                "Cannot async update games directory when disconnected.",
+            )
+            return
+        games_dir_response = await self._async_send(
+            self._websocket,
+            Packet(REQUEST_GAME_DIR),
+        )
+        self._on_games_dir(games_dir_response)
+
+    def _on_games_dir(self, response: Response):
+        self.__games_dir = response.payload.get("games", {})
+        if self.on_games_dir:
+            self.on_games_dir(self.__games_dir)
 
     async def _handle_game_queue(
         self,
@@ -341,8 +354,7 @@ class BaseClient:
         self,
         websocket: ClientWebSocket,
         packet: Packet,
-        *,
-        wait_for_socket: bool = True,
+        pubkey: Optional[str] = None,
     ) -> Response:
         """Send and receive from server.
 
@@ -360,14 +372,19 @@ class BaseClient:
 
         self._websocket_busy = True
         try:
+            message = packet.serialize()
+            if pubkey:
+                message = self._key.encrypt(pubkey, message)
             await asyncio.wait_for(
-                websocket.send(packet.serialize()),
+                websocket.send(message),
                 timeout=self.response_timeout,
             )
             response: str = await asyncio.wait_for(
                 websocket.recv(),
                 timeout=self.response_timeout,
             )
+            if pubkey:
+                response = self._key.decrypt(pubkey, response)
             self._websocket_busy = False
             return Response.deserialize(response)
         # Catch any connection and timeout errors, initiate disconnect sequence

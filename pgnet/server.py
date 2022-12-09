@@ -25,9 +25,12 @@ import time
 import websockets
 from dataclasses import dataclass, field
 from websockets.server import WebSocketServerProtocol as ServerWebSocket
+import hashlib
 from .common import (
     Packet,
     Response,
+    CryptoKey,
+    CipherError,
     BaseGame,
     DEFAULT_PORT,
     REQUEST_GAME_DIR,
@@ -39,6 +42,11 @@ from .common import (
     STATUS_BAD,
     STATUS_UNEXPECTED,
 )
+
+
+def safe_hash(text: str) -> str:
+    """Hash a string securely using Python's hashlib."""
+    return hashlib.sha256(text.encode()).hexdigest()
 
 
 @dataclass
@@ -102,8 +110,9 @@ class BaseServer:
                 handshake successfully.
             verbose_logging: Log packets and responses.
         """
+        self._key: CryptoKey = CryptoKey()
         self.__stop: Optional[asyncio.Future] = None
-        self.__passwords: dict[str, str] = {ADMIN_USERNAME: admin_password}
+        self.__passwords: dict[str, str] = {ADMIN_USERNAME: safe_hash(admin_password)}
         self.__games: dict[str, _LobbyGame] = {}
         self.__connected_users: dict[str, Optional[str]] = {}  # username to game name
         self.__kicked_users: set[str] = set()
@@ -168,36 +177,64 @@ class BaseServer:
         username: Optional[str] = None
         logger.info(f"New connection from: {source!r}")
         try:
-            username = await self._handle_handshake(websocket)
-            if username:
-                await self._handle_user(username, websocket)
+            pubkey = await self._handle_key_trade(websocket)
+            if pubkey:
+                username = await self._handle_handshake(websocket, pubkey)
+                if username:
+                    await self._handle_user(username, websocket)
         except websockets.exceptions.ConnectionClosed:
             pass
+        except CipherError as e:
+            logger.debug(f"{e=}")
         logger.info(f"Client connection {source!r} closed.")
         self._remove_user_connection(username)
 
-    async def _handle_handshake(self, websocket: ServerWebSocket) -> Optional[str]:
+    async def _handle_key_trade(self, websocket: ServerWebSocket) -> str:
+        message = await websocket.recv()
+        packet = Packet.deserialize(message)
+        pubkey = packet.payload.get("pubkey")
+        logger.debug(f"{pubkey=}")
+        if not pubkey or not isinstance(pubkey, str):
+            response = Response(
+                "Missing public key string.",
+                status=STATUS_BAD,
+                disconnecting=True,
+            )
+            await websocket.send(response.serialize())
+            return None
+        response = Response("key_trade", dict(pubkey=self._key.pubkey))
+        await websocket.send(response.serialize())
+        return pubkey
+
+    async def _handle_handshake(
+        self,
+        websocket: ServerWebSocket,
+        pubkey: str,
+    ) -> Optional[str]:
         """Produce an authenticated username from a connection or None."""
         source = f"{websocket.remote_address[0]}:{websocket.remote_address[1]}"
         max_attempts = remaining_attempts = self.max_handshake_attempts
         while True:
-            message = await websocket.recv()
-            packet = Packet.deserialize(message)
+            cipher_message = await websocket.recv()
+            packet = Packet.deserialize(self._key.decrypt(pubkey, cipher_message))
             remaining_attempts -= 1
             # Authenticate
             username = packet.payload.get("username")
             password = packet.payload.get("password")
-            if packet.message != "handshake":
-                fail = "Missing handshake message."
-            else:
+            if password:
+                password = safe_hash(password)
+            if packet.message == "handshake":
                 fail = self._check_auth(username, password)
+            else:
+                fail = "Missing handshake message."
             if not fail:
                 if username == ADMIN_USERNAME:
                     logger.warning(f"Handshake authenticated as admin from: {source!r}")
                 self._add_user_connection(username)
                 m = f"Handshake from {source!r} success: {username=}"
                 logger.info(m)
-                await websocket.send(Response(m).serialize())
+                response = Response(m).serialize()
+                await websocket.send(self._key.encrypt(pubkey, response))
                 return username
             # Respond with problem
             elif remaining_attempts:
@@ -205,8 +242,8 @@ class BaseServer:
                     fail,
                     dict(remaining_attempts=remaining_attempts),
                     status=STATUS_UNEXPECTED,
-                )
-                await websocket.send(response.serialize())
+                ).serialize()
+                await websocket.send(self._key.encrypt(pubkey, response))
             # Stop at max attempts
             else:
                 fail = f"{fail} (max attempts reached)"
