@@ -3,7 +3,7 @@
 # flake8: noqa  - Errors due to imports we do for the pgnet API.
 
 
-from .common import (
+from .util import (
     Packet,
     Response,
     BaseGame,

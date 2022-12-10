@@ -7,30 +7,22 @@ server.
 By default, the server is configured to listen on localhost. To listen
 globally, use address "". It is highly recommended to configure an admin
 password when listening globally.
-
-Warning: do not use in production. Security is very shallow and
-communicated in plaintext.
-
-Todo:
-- Kick address (not just username)
-- Kick address on spam
-- Hash and salt passwords
-- Use at least a basic form of (public-private key) encryption
 """
 
 from loguru import logger
-from typing import Optional, Type
+from typing import Optional, Callable, Type, Any
 import asyncio
 import time
 import websockets
 from dataclasses import dataclass, field
 from websockets.server import WebSocketServerProtocol as ServerWebSocket
 import hashlib
-from .common import (
+from .util import (
     Packet,
     Response,
-    CryptoKey,
-    CipherError,
+    DisconnectedError,
+    Key,
+    Connection,
     BaseGame,
     DEFAULT_PORT,
     REQUEST_GAME_DIR,
@@ -44,13 +36,32 @@ from .common import (
 )
 
 
-def safe_hash(text: str) -> str:
-    """Hash a string securely using Python's hashlib."""
-    return hashlib.sha256(text.encode()).hexdigest()
+def hash_password(password: str) -> str:
+    """Hash a string using Python's hashlib."""
+    return hashlib.sha256(password.encode()).hexdigest()
+
+
+@dataclass
+class UserConnection(Connection):
+    """Subclass of Connection with de/serialization and server-related attributes."""
+
+    username: Optional[str] = None
+    game: Optional[str] = None
+
+    async def send(self, response: Response, *args, **kwargs):
+        """Override base method to serialize response."""
+        await super().send(response.serialize(), *args, **kwargs)
+
+    async def recv(self, *args, **kwargs) -> Packet:
+        """Override base method to deserialize packet."""
+        message = await super().recv(*args, **kwargs)
+        return Packet.deserialize(message)
 
 
 @dataclass
 class _LobbyGame:
+    """BaseGame instance wrapper for management by server."""
+
     game: BaseGame
     name: str
     password: Optional[str]
@@ -58,10 +69,11 @@ class _LobbyGame:
 
     @property
     def password_protected(self) -> bool:
+        """If the game is password protected."""
         return bool(self.password)
 
     def add_user(self, username: str, password: str) -> bool:
-        """Return if user was added."""
+        """Return if user was successfully added."""
         if password != self.password:
             logger.debug("Incorrect password.")
             return False
@@ -76,6 +88,7 @@ class _LobbyGame:
             self.game.remove_user(username)
 
     def handle_packet(self, packet: Packet) -> Response:
+        """Relay packet handling to game instance."""
         response = self.game.handle_packet(packet)
         return response
 
@@ -96,7 +109,7 @@ class BaseServer:
         port: int = DEFAULT_PORT,
         admin_password: str = DEFAULT_ADMIN_PASSWORD,
         registration_enabled: bool = True,
-        max_handshake_attempts: int = 2,
+        on_connection: Optional[Callable[[str, bool], Any]] = None,
         verbose_logging: bool = False,
     ):
         """Initialize the server.
@@ -106,216 +119,195 @@ class BaseServer:
             port: Port number to listen on.
             admin_password: Password for admin user with elevated priviliges.
             registration_enabled: Allow new users to register.
-            max_handshake_attempts: Maximum number of tries to allow a client to
-                handshake successfully.
+            on_connection: Callback for when a username connects or disconnects.
             verbose_logging: Log packets and responses.
         """
-        self._key: CryptoKey = CryptoKey()
-        self.__stop: Optional[asyncio.Future] = None
-        self.__passwords: dict[str, str] = {ADMIN_USERNAME: safe_hash(admin_password)}
-        self.__games: dict[str, _LobbyGame] = {}
-        self.__connected_users: dict[str, Optional[str]] = {}  # username to game name
-        self.__kicked_users: set[str] = set()
-        self.__game: Type[BaseGame] = game
+        self._key: Key = Key()
+        self._stop: Optional[asyncio.Future] = None
+        self._passwords: dict[str, str] = {
+            ADMIN_USERNAME: hash_password(admin_password),
+        }
+        self._games: dict[str, _LobbyGame] = {}
+        self._user_connections: dict[str, Optional[UserConnection]] = {}
+        self._kicked_users: set[str] = set()
+        self._game: Type[BaseGame] = game
         self.address: str = address
         self.port: int = port
         self.registration_enabled: bool = registration_enabled
-        self.max_handshake_attempts: int = max_handshake_attempts
+        self.on_connection: Optional[Callable[[str, bool], Any]] = on_connection
         self.verbose_logging: bool = verbose_logging
-        print(f"{admin_password=}")  # Use print instead of logger for "sensitive" info
+        logger.debug(f"{self._game=}")
+        logger.debug(f"{self._key=}")
+        print(f"{admin_password=}")  # Use print instead of logger for password
 
-    async def async_run(self) -> int:
+    async def async_run(self, *, on_start: Optional[Callable] = None) -> int:
         """Start the server.
 
-        The server will listen for connections and pass them off to the websocket
-        handler. Returns an exit code, where -1 is a request to reboot.
+        The server will listen for connections and pass them off to the
+        connection handler.
+
+        Args:
+            on_start: Callback for when the server is online and handling messages.
+
+        Returns:
+            Exit code as given by the `shutdown` command. -1 indicates a
+                request to reboot the server.
         """
-        self.__stop = asyncio.Future()
+        if self._stop:
+            raise RuntimeError("Can only run the server once per instance.")
+        self._stop = asyncio.Future()
         serving_args = (self._connection_handler, self.address, self.port)
         try:
             async with websockets.serve(*serving_args):
                 logger.info(f"Handling messages {self}")
-                await self.__stop
+                if on_start:
+                    on_start()
+                await self._stop
         except OSError as e:
             added = OSError(f"Server fail. Perhaps one is already running? {self}")
             raise added from e
-        r = self.__stop.result()
-        logger.info(f"Server stop result {r=} {self}")
-        return r
-
-    def on_connection(self, username: str, connected: bool):
-        """Override this method to respond to connections and disconnections."""
-        logger.info(f"{connected=} {username=}")
+        result = self._stop.result()
+        logger.info(f"Server stop {result=} {self}")
+        return result
 
     def shutdown(self, result: int = 0, /):
         """Stop the server."""
-        if self.__stop and not self.__stop.done():
-            self.__stop.set_result(result)
+        if self._stop and not self._stop.done():
+            self._stop.set_result(result)
 
     def kick_username(self, username: str):
         """Kick and blacklist a given username from the server."""
         if username == ADMIN_USERNAME:
             logger.warning("Cannot kick admin.")
             return
-        self.__kicked_users.add(username)
-
-    def __repr__(self) -> str:
-        """Object repr."""
-        return (
-            f"<{self.__class__.__qualname__} "
-            f"address={self.address!r} port={self.port!r} "
-            f"{id(self)}>"
-        )
+        self._kicked_users.add(username)
 
     async def _connection_handler(self, websocket: ServerWebSocket):
         """Handle new connections.
 
-        A handshake provides an authenticated username and privilege level
-        (is admin). Then each message received is passed to the packet handler.
+        Allows the handshake to fully populate a UserConnection, which may then
+        be handled as a logged in user.
         """
-        source = f"{websocket.remote_address[0]}:{websocket.remote_address[1]}"
-        username: Optional[str] = None
-        logger.info(f"New connection from: {source!r}")
+        connection = UserConnection(websocket)
+        logger.info(f"New connection: {connection}")
         try:
-            pubkey = await self._handle_key_trade(websocket)
-            if pubkey:
-                username = await self._handle_handshake(websocket, pubkey)
-                if username:
-                    await self._handle_user(username, websocket)
-        except websockets.exceptions.ConnectionClosed:
-            pass
-        except CipherError as e:
+            await self._handle_handshake(connection)
+            self._add_user_connection(connection)
+            logger.info(f"User logged in: {connection}")
+            await self._handle_user(connection)
+        except DisconnectedError as e:
             logger.debug(f"{e=}")
-        logger.info(f"Client connection {source!r} closed.")
-        self._remove_user_connection(username)
+        finally:
+            logger.info(f"Closed connection: {connection}")
+            game = self._games.get(connection.game)
+            if game:
+                if not connection.username:
+                    logger.error(f"In game but no username! {connection}")
+                game.remove_user(connection.username)
+            self._remove_user_connection(connection)
 
-    async def _handle_key_trade(self, websocket: ServerWebSocket) -> str:
-        message = await websocket.recv()
-        packet = Packet.deserialize(message)
+    async def _handle_handshake(self, connection: UserConnection):
+        """Handle a new connection's handshake sequence. Modifies the connection object.
+
+        First trade public keys and assign the connection's `tunnel`. Then authenticate
+        and assign the connection's `username`.
+        """
+        # Trade public keys
+        packet = await connection.recv()
         pubkey = packet.payload.get("pubkey")
-        logger.debug(f"{pubkey=}")
         if not pubkey or not isinstance(pubkey, str):
             response = Response(
                 "Missing public key string.",
                 status=STATUS_BAD,
                 disconnecting=True,
             )
-            await websocket.send(response.serialize())
-            return None
+            await connection.send(response)
+            raise DisconnectedError("Incompatible protocol: missing pubkey.")
         response = Response("key_trade", dict(pubkey=self._key.pubkey))
-        await websocket.send(response.serialize())
-        return pubkey
-
-    async def _handle_handshake(
-        self,
-        websocket: ServerWebSocket,
-        pubkey: str,
-    ) -> Optional[str]:
-        """Produce an authenticated username from a connection or None."""
-        source = f"{websocket.remote_address[0]}:{websocket.remote_address[1]}"
-        max_attempts = remaining_attempts = self.max_handshake_attempts
-        while True:
-            cipher_message = await websocket.recv()
-            packet = Packet.deserialize(self._key.decrypt(pubkey, cipher_message))
-            remaining_attempts -= 1
-            # Authenticate
-            username = packet.payload.get("username")
-            password = packet.payload.get("password")
-            if password:
-                password = safe_hash(password)
-            if packet.message == "handshake":
-                fail = self._check_auth(username, password)
-            else:
-                fail = "Missing handshake message."
-            if not fail:
-                if username == ADMIN_USERNAME:
-                    logger.warning(f"Handshake authenticated as admin from: {source!r}")
-                self._add_user_connection(username)
-                m = f"Handshake from {source!r} success: {username=}"
-                logger.info(m)
-                response = Response(m).serialize()
-                await websocket.send(self._key.encrypt(pubkey, response))
-                return username
-            # Respond with problem
-            elif remaining_attempts:
-                response = Response(
-                    fail,
-                    dict(remaining_attempts=remaining_attempts),
-                    status=STATUS_UNEXPECTED,
-                ).serialize()
-                await websocket.send(self._key.encrypt(pubkey, response))
-            # Stop at max attempts
-            else:
-                fail = f"{fail} (max attempts reached)"
-                response = Response(
-                    "Disconnecting: failed to handshake.",
-                    dict(reason=fail, max_attempts=max_attempts),
-                    status=STATUS_BAD,
-                    disconnecting=True,
-                )
-                logger.info(f"{response.debug_repr}")
-                await websocket.send(response.serialize())
-                return None
+        await connection.send(response)
+        connection.tunnel = self._key.get_tunnel(pubkey)
+        logger.debug(f"Assigned tunnel: {connection}")
+        # Authenticate
+        packet = await connection.recv()
+        username = packet.payload.get("username")
+        password = packet.payload.get("password")
+        if password:
+            password = hash_password(password)
+        fail = self._check_auth(username, password)
+        if fail:
+            # Respond with problem and disconnect
+            response = Response(fail, status=STATUS_BAD, disconnecting=True)
+            await connection.send(response)
+            raise DisconnectedError("Failed to authenticate.")
+        connection.username = username
+        logger.debug(f"Assigned username: {connection}")
+        if username == ADMIN_USERNAME:
+            logger.warning(f"Authenticated as admin: {connection}")
+        await connection.send(Response("Authenticated."))
 
     def _check_auth(self, username: str, password: str) -> Optional[str]:
         """Return failure reason or None."""
         if not username:
             return "Missing non-empty username."
-        if username in self.__kicked_users:
+        if username in self._kicked_users:
             return "Username kicked."
-        if username in self.__connected_users:
+        if username in self._user_connections:
             return "Username already connected."
-        if username not in self.__passwords:
+        if username not in self._passwords:
             name_allowed = ADMIN_USERNAME.lower() not in username.lower()
             if self.registration_enabled and name_allowed:
-                self.__passwords[username] = password
+                self._passwords[username] = password
                 logger.info(f"Registered {username=}")
                 return None
             elif not self.registration_enabled:
                 return "Username not found, registration blocked."
             else:
                 return "Username not allowed."
-        if password != self.__passwords.get(username):
+        if password != self._passwords.get(username):
             return "Incorrect password."
         return None
 
-    def _add_user_connection(self, username: str):
-        if username in self.__connected_users:
-            return
-        self.__connected_users[username] = None
+    def _add_user_connection(self, connection: UserConnection):
+        """Add the connection to connected users table."""
+        username = connection.username
+        assert username not in self._user_connections
+        self._user_connections[username] = connection
         if self.on_connection:
             self.on_connection(username, True)
 
-    def _remove_user_connection(self, username: str):
-        if username not in self.__connected_users:
+    def _remove_user_connection(self, connection: UserConnection):
+        """Remove the connection from connected users table if exists."""
+        username = connection.username
+        if username not in self._user_connections:
             return
-        del self.__connected_users[username]
+        del self._user_connections[username]
         if self.on_connection:
             self.on_connection(username, False)
 
-    async def _handle_user(self, username: str, websocket: ServerWebSocket):
-        """Handle a logged in user connection."""
-        async for message in websocket:
-            do_log = self.verbose_logging
-            packet = Packet.deserialize(message)
+    async def _handle_user(self, connection: UserConnection):
+        """Handle a logged in user connection - handle packets and return responses."""
+        username = connection.username
+        while True:
+            # Wait for packet from user
+            packet = await connection.recv(timeout=3600.0)
+            # Important! We must set the packet's authenticated username.
             packet.username = username
+            do_log = self.verbose_logging
             if do_log:
                 logger.debug(packet)
-            if username in self.__kicked_users:
-                response = Response(
-                    "Disconnecting: kicked.",
-                    dict(reason="Kicked."),
-                    disconnecting=True,
-                )
+            if username in self._kicked_users:
+                response = Response("Kicked.", disconnecting=True)
             else:
                 response: Response = self._handle_packet(packet)
             if do_log:
                 logger.debug(f"--> {response}")
-            response.game = self.__connected_users[username]
             assert isinstance(response, Response)
-            await websocket.send(response.serialize())
+            # Also important, to set the game of the response for the client.
+            response.game = self._user_connections[username].game
+            await connection.send(response)
+            # The packet handler may have determined we are disconnecting
             if response.disconnecting:
-                return
+                raise DisconnectedError(response.message)
 
     def _handle_packet(self, packet: Packet) -> Response:
         """Handle a packet from a logged in user."""
@@ -331,15 +323,15 @@ class BaseServer:
             response = self._handle_admin_packet(packet)
             if response:
                 return response
-        game_name: Optional[str] = self.__connected_users[packet.username]
+        game_name: Optional[str] = self._user_connections[packet.username].game
         if not game_name:
-            return Response("Please join a game.")
+            return self._canned_lobby_response
         return self._handle_game_packet(packet, game_name)
 
     def _game_dir_response(self) -> Response:
         """Create a Response with dictionary of games details."""
         games_dict = {}
-        for name, game in self.__games.items():
+        for name, game in self._games.items():
             games_dict[game.name] = dict(
                 name=game.name,
                 users=len(game.connected_users),
@@ -349,7 +341,7 @@ class BaseServer:
 
     def _handle_join_game(self, packet: Packet) -> Response:
         """Handle a request to join the game specified in the payload."""
-        current_name: Optional[str] = self.__connected_users[packet.username]
+        current_name: Optional[str] = self._user_connections[packet.username].game
         if current_name:
             return Response("Must leave game first.", status=STATUS_UNEXPECTED)
         new_name: Optional[str] = packet.payload.get("name")
@@ -357,47 +349,46 @@ class BaseServer:
             return Response("Please specify a game.", status=STATUS_UNEXPECTED)
         if new_name == current_name:
             return Response("Already in game.", status=STATUS_UNEXPECTED)
-        game = self.__games.get(new_name)
+        game = self._games.get(new_name)
         if not game:
             return self._handle_create_game(packet)
         password = packet.payload.get("password")
         success = game.add_user(packet.username, password)
         if not success:
-            return Response("Failed to join.", status=STATUS_BAD)
-        self.__connected_users[packet.username] = new_name
+            return Response("Failed to join.", status=STATUS_UNEXPECTED)
+        self._user_connections[packet.username].game = new_name
         return Response("Joined game.")
 
     def _handle_leave_game(self, packet: Packet) -> Response:
         """Handle a request to leave the game."""
-        name: Optional[str] = self.__connected_users[packet.username]
+        name: Optional[str] = self._user_connections[packet.username].game
         if not name:
             return Response("Not in game.", status=STATUS_UNEXPECTED)
-        self.__connected_users[packet.username] = None
-        game = self.__games.get(name)
+        self._user_connections[packet.username].game = None
+        game = self._games.get(name)
         game.remove_user(packet.username)
-        if not game.connected_users:
-            del self.__games[name]
         return Response("Left game.")
 
     def _handle_create_game(self, packet: Packet) -> Response:
-        current_game = self.__connected_users[packet.username]
+        """Handle request to create a new game specified in the payload."""
+        current_game = self._user_connections[packet.username].game
         if current_game:
             return Response("Must leave game first.", status=STATUS_UNEXPECTED)
         name = packet.payload.get("name")
         if not name:
             return Response("Missing non-empty name.", status=STATUS_UNEXPECTED)
-        if name in self.__games:
+        if name in self._games:
             return Response("Name already exists.", status=STATUS_UNEXPECTED)
         password = packet.payload.get("password")
         new_game = _LobbyGame(
-            self.__game(name),
+            self._game(name),
             name=name,
             password=password,
         )
-        self.__games[new_game.name] = new_game
+        self._games[new_game.name] = new_game
         joined = new_game.add_user(packet.username, password)
         assert joined
-        self.__connected_users[packet.username] = new_game.name
+        self._user_connections[packet.username].game = new_game.name
         return Response("Created new game.")
 
     def _handle_game_packet(self, packet: Packet, game_name: str) -> Response:
@@ -406,11 +397,11 @@ class BaseServer:
         Will use the response's `disconnecting` attribute to remove the user
         from the game, and then clear the attribute.
         """
-        game = self.__games[game_name]
+        game = self._games[game_name]
         response: Response = game.handle_packet(packet)
         assert isinstance(response, Response)
         if response.disconnecting:
-            self.__connected_users[packet.username] = None
+            self._user_connections[packet.username].game = None
             game.remove_user(packet.username)
             response.disconnecting = False
         return response
@@ -436,7 +427,7 @@ class BaseServer:
     def _admin_reboot(self, packet: Packet) -> Response:
         """Reboot the server."""
         self.shutdown(-1)
-        return Response("Rebooting...")
+        return Response("Attempting to reboot...")
 
     def _admin_help(self, packet: Packet) -> Response:
         """Return available admin commands."""
@@ -474,22 +465,19 @@ class BaseServer:
 
     def _admin_debug(self, packet: Packet) -> Response:
         """Return debugging info."""
-        non_kicked = set(self.__passwords.keys()) - self.__kicked_users
+        non_kicked = set(self._passwords.keys()) - self._kicked_users
         debug = "\n".join([
             packet.debug_repr,
             "Kicked users:",
-            *(f" -- {u}" for u in sorted(self.__kicked_users)),
+            *(f" -- {u}" for u in sorted(self._kicked_users)),
             "All users:",
             *(f" -- {u}" for u in sorted(non_kicked)),
             "Connected users:",
-            *(
-                f" -- {u:<40} | {g}"
-                for u, g in sorted(self.__connected_users.items())
-            ),
+            *(f"  {conn}" for u, conn in sorted(self._user_connections.items())),
             "Games:",
             *(
                 f" -- {g.name:<40} | {', '.join(str(u) for u in g.connected_users)}"
-                for name, g in sorted(self.__games.items())
+                for name, g in sorted(self._games.items())
             ),
         ])
         return Response("Debug", dict(debug=debug))
@@ -504,3 +492,22 @@ class BaseServer:
         s = min(max_sleep, s)
         time.sleep(s)
         return Response(f"Slept for {s} seconds")
+
+    _canned_lobby_response = Response(
+        "Please create/join a game.",
+        dict(commands=[
+            REQUEST_GAME_DIR,
+            REQUEST_CREATE_GAME,
+            REQUEST_JOIN_GAME,
+            REQUEST_LEAVE_GAME,
+        ]),
+        status=STATUS_UNEXPECTED,
+    )
+
+    def __repr__(self) -> str:
+        """Object repr."""
+        return (
+            f"<{self.__class__.__qualname__} "
+            f"address={self.address!r} port={self.port!r} "
+            f"{id(self)}>"
+        )

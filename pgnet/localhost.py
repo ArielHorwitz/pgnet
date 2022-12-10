@@ -7,15 +7,15 @@ client interface.
 
 from typing import Type
 import asyncio
-from . import common
 from . import client
 from . import server
+from .util import BaseGame, DEFAULT_PORT
 
 
-class LocalhostClient(client.BaseClient):
+class LocalhostClientMixin:
     """See module documentation for details."""
 
-    def __init__(self, game: Type[common.BaseGame], **client_kwargs):
+    def __init__(self, game: Type[BaseGame], **client_kwargs):
         """See module documentation for details.
 
         Args:
@@ -25,18 +25,25 @@ class LocalhostClient(client.BaseClient):
         client_kwargs.setdefault("username", "Player")
         client_kwargs.setdefault("password", "")
         client_kwargs["address"] = "localhost"
-        client_kwargs["port"] = common.DEFAULT_PORT
+        client_kwargs["port"] = DEFAULT_PORT
         super().__init__(**client_kwargs)
         self._server = server.BaseServer(game)
 
     async def async_connect(self, *args, **kwargs):
-        """Start a server and connect."""
-        server_task = asyncio.create_task(self._server.async_run())
+        """Start a server, then connect."""
+        started = asyncio.Future()
+        server_coro = self._server.async_run(on_start=lambda *a: started.set_result(1))
+        server_task = asyncio.create_task(server_coro)
         server_task.add_done_callback(lambda *a: self.close())
+        await asyncio.wait((server_task, started), return_when=asyncio.FIRST_COMPLETED)
         await super().async_connect(*args, **kwargs)
         self.close()
 
     def close(self):
-        """Close the connection and server."""
+        """Close both client and server."""
         super().close()
         self._server.shutdown()
+
+
+class LocalhostClient(LocalhostClientMixin, client.BaseClient):
+    """See module documentation for details."""

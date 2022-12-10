@@ -1,6 +1,6 @@
 """Developer client - command line tool to interface with a server."""
 
-from typing import Optional
+from typing import Optional, Type
 import sys
 import functools
 import arrow
@@ -8,7 +8,7 @@ import asyncio
 import aioconsole
 from .client import BaseClient
 from .localhost import LocalhostClient
-from .common import (
+from .util import (
     Packet,
     Response,
     BaseGame,
@@ -16,38 +16,6 @@ from .common import (
     ADMIN_USERNAME,
     DEFAULT_ADMIN_PASSWORD,
 )
-
-
-def run() -> int:
-    """Run a CLI client for developers."""
-    username = ADMIN_USERNAME
-    password = DEFAULT_ADMIN_PASSWORD
-    kw = dict(
-        on_connection=functools.partial(print, "conn"),
-        on_status=functools.partial(print, "status"),
-        on_game=functools.partial(print, "game"),
-        on_games_dir=functools.partial(print, "games dir"),
-    )
-    if len(sys.argv) > 1 and sys.argv[1] == "-r":
-        address = input("Enter address (leave blank for localhost): ") or "localhost"
-        port = int(input("Enter port (leave blank for default): ") or DEFAULT_PORT)
-        username = input("Enter username (leave blank for admin): ") or username
-        password = input("Enter password (leave blank for default): ") or password
-        client = BaseClient(
-            username=username,
-            password=password,
-            address=address,
-            port=port,
-            **kw,
-        )
-    else:
-        client = LocalhostClient(
-            game=DevGame,
-            username=ADMIN_USERNAME,
-            password=DEFAULT_ADMIN_PASSWORD,
-            **kw,
-        )
-    return asyncio.run(DevClient(client).run())
 
 
 class DevGame(BaseGame):
@@ -81,41 +49,28 @@ class DevClient:
         if not conn_task.done():
             self.client.close()
             await asyncio.wait_for(conn_task, timeout=1)
-        if cli_task.done():
-            return_code = cli_task.result()
-        else:
-            return_code = 0
-        return return_code
 
     def _close(self, *args):
         self.client.close()
 
     async def _async_cli(self):
+        while not self.client.connected:
+            await asyncio.sleep(0.1)
         while True:
             uinput = await aioconsole.ainput(">> ")
             if uinput == "quit":
-                return 0
-            if uinput == "restart":
-                return -1
-            if uinput == "games":
-                await self.client._async_update_games_dir()
-                continue
+                return
             packet = _parse_cli_packet(uinput)
-            await self._relay_packet(packet)
+            if packet:
+                await self._relay_packet(packet)
 
     async def _relay_packet(self, packet):
         print(packet.debug_repr)
         print(f"    SENT: {arrow.now().for_json()}")
-        if self.client.game:
-            response = asyncio.Future()
-            self.client.queue(packet, lambda sr, r=response: r.set_result(sr))
-            await response
-            _log_response(response.result())
-        elif self.client._websocket:
-            response = await self.client._async_send(self.client._websocket, packet)
-            _log_response(response)
-        else:
-            print("NO CONNECTION.")
+        response = asyncio.Future()
+        self.client.send(packet, lambda sr, r=response: r.set_result(sr))
+        await response
+        _log_response(response.result())
 
 
 def _parse_cli_packet(s: str, /) -> Optional[Packet]:
@@ -152,3 +107,40 @@ def _log_response(response: Response):
         ])
     print("\n".join(strs))
     print("=" * 20)
+
+
+def run():
+    """Run the CLI client as a main (non-async) entry point."""
+    remote = len(sys.argv) > 1 and sys.argv[1] == "-r"
+    asyncio.run(async_run(remote=remote))
+
+
+async def async_run(*, remote: bool = False, game: Type[BaseGame] = DevGame):
+    """Run the CLI client for admins and developers."""
+    username = ADMIN_USERNAME
+    password = DEFAULT_ADMIN_PASSWORD
+    kw = dict(
+        on_connection=functools.partial(print, ">> CONN:"),
+        on_status=functools.partial(print, ">> STATUS:"),
+        on_game=functools.partial(print, ">> GAME:"),
+    )
+    if remote:
+        address = input("Enter address (leave blank for localhost): ") or "localhost"
+        port = int(input("Enter port (leave blank for default): ") or DEFAULT_PORT)
+        username = input("Enter username (leave blank for admin): ") or username
+        password = input("Enter password (leave blank for default): ") or password
+        client = BaseClient(
+            address=address,
+            port=port,
+            username=username,
+            password=password,
+            **kw,
+        )
+    else:
+        client = LocalhostClient(
+            game=game,
+            username=ADMIN_USERNAME,
+            password=DEFAULT_ADMIN_PASSWORD,
+            **kw,
+        )
+    return await DevClient(client).run()
