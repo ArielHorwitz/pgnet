@@ -119,7 +119,10 @@ class BaseClient:
             self._set_status("Logging in...", logger.info)
             await self._handle_handshake(connection)
             self._set_connection(True)
-            self._set_status(f"Connected to: {connection.remote}", logger.info)
+            self._set_status(
+                f"Logged in as {self.username} @ {connection.remote}",
+                logger.info,
+            )
             await self._handle_user_connection(connection)
         except DisconnectedError as e:
             logger.debug(f"{e=}")
