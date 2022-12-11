@@ -2,6 +2,8 @@
 
 Use `BaseClient.async_connect` to connect to the server. Use `BaseClient.queue`
 to send packets and set a callback when a response returns.
+
+For extra security, use `verify_server_pubkey` when initializing a client.
 """
 
 from typing import Optional, Callable, Any
@@ -59,6 +61,7 @@ class BaseClient:
         port: int = DEFAULT_PORT,
         username: str = "guest",
         password: str = "",
+        verify_server_pubkey: Optional[str] = None,
         on_connection: Optional[Callable[[bool], Any]] = None,
         on_status: Optional[Callable[[str], Any]] = None,
         on_game: Optional[Callable[[Optional[str]], Any]] = None,
@@ -70,6 +73,9 @@ class BaseClient:
             port: Server port number
             username: The user's username.
             password: The user's password.
+            verify_server_pubkey: If set, will compare against the public
+                key of the server and disconnect if it's public key does
+                not match.
             on_connection: Callback for when connecting or disconnecting.
             on_status: Callback for when client's status changes.
             on_game: Callback for when joining or leaving a game.
@@ -85,6 +91,7 @@ class BaseClient:
         self.port: int = port
         self.username: str = username
         self.password: str = password
+        self.verify_server_pubkey: Optional[str] = verify_server_pubkey
         self.on_connection = on_connection
         self.on_status = on_status
         self.on_game = on_game
@@ -115,6 +122,7 @@ class BaseClient:
             self._set_status(f"Connected to: {connection.remote}", logger.info)
             await self._handle_user_connection(connection)
         except DisconnectedError as e:
+            logger.debug(f"{e=}")
             self._set_status(f"Disconnected: {e.args[0]}")
         finally:
             if connection:
@@ -196,6 +204,10 @@ class BaseClient:
         pubkey = response.payload.get("pubkey")
         if not pubkey or not isinstance(pubkey, str):
             raise DisconnectedError("Missing public key string from server.")
+        if self.verify_server_pubkey:
+            if pubkey != self.verify_server_pubkey:
+                raise DisconnectedError("Unverified server public key.")
+            logger.debug(f"Server pubkey verified: {pubkey=}")
         connection.tunnel = self._key.get_tunnel(pubkey)
         logger.debug(f"Assigned tunnel: {connection}")
         # Authenticate

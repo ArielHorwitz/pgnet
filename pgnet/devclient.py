@@ -129,11 +129,13 @@ async def async_run(*, remote: bool = False, game: Type[BaseGame] = DevGame):
         port = int(input("Enter port (leave blank for default): ") or DEFAULT_PORT)
         username = input("Enter username (leave blank for admin): ") or username
         password = input("Enter password (leave blank for default): ") or password
+        pubkey = input("Enter pubkey to verify (leave blank to ignore): ") or None
         client = BaseClient(
             address=address,
             port=port,
             username=username,
             password=password,
+            verify_server_pubkey=pubkey,
             **kw,
         )
     else:
