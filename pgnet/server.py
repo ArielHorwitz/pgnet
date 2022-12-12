@@ -36,6 +36,9 @@ from .util import (
 )
 
 
+MAX_USERNAME_LEN = 20
+
+
 def hash_password(password: str) -> str:
     """Hash a string using Python's hashlib."""
     return hashlib.sha256(password.encode()).hexdigest()
@@ -254,7 +257,9 @@ class BaseServer:
         if username in self._user_connections:
             return "Username already connected."
         if username not in self._passwords:
-            name_allowed = ADMIN_USERNAME.lower() not in username.lower()
+            not_admin = ADMIN_USERNAME.lower() not in username.lower()
+            not_long = len(username) <= MAX_USERNAME_LEN
+            name_allowed = not_admin and not_long
             if self.registration_enabled and name_allowed:
                 self._passwords[username] = password
                 logger.info(f"Registered {username=}")
