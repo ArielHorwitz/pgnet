@@ -20,6 +20,7 @@ from .util import (
     DEFAULT_PORT,
     DisconnectedError,
     REQUEST_GAME_DIR,
+    REQUEST_CREATE_GAME,
     REQUEST_JOIN_GAME,
     REQUEST_LEAVE_GAME,
     STATUS_OK,
@@ -152,9 +153,19 @@ class BaseClient:
         """Get the games directory from the server and pass the response to callback."""
         self.send(Packet(REQUEST_GAME_DIR), callback, do_next=True)
 
-    def join_game(self, game_name: str, /):
+    def create_game(self, name: str, /, password: Optional[str] = None):
         """Request from the server to join a game."""
-        self.send(Packet(REQUEST_JOIN_GAME, dict(name=game_name)), do_next=True)
+        payload = dict(name=name)
+        if password:
+            payload["password"] = password
+        self.send(Packet(REQUEST_CREATE_GAME, payload), do_next=True)
+
+    def join_game(self, name: str, /, password: Optional[str] = None):
+        """Request from the server to join a game."""
+        payload = dict(name=name)
+        if password:
+            payload["password"] = password
+        self.send(Packet(REQUEST_JOIN_GAME, payload), do_next=True)
 
     def leave_game(self):
         """Request from the server to leave the game."""
