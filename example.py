@@ -5,7 +5,7 @@ import pgnet
 import sys
 
 
-class Game(pgnet.BaseGame):
+class MyGame(pgnet.BaseGame):
     """Example class for game logic."""
 
     def handle_packet(self, packet: pgnet.Packet) -> pgnet.Response:
@@ -47,7 +47,7 @@ class MockUI:
 
 async def run_client():
     """Create a client, pass it to the mock UI and connect."""
-    local_client = pgnet.LocalhostClient(Game, username="thelegend27")
+    local_client = pgnet.LocalhostClient(MyGame, username="thelegend27")
     remote_client = pgnet.BaseClient(
         address="1.23.23.1",
         username="thelegend27",
@@ -61,8 +61,8 @@ async def run_client():
 
 
 async def run_server():
-    """Run the server to host the `Game` class."""
-    server = pgnet.BaseServer(Game)
+    """Run the server to host the `MyGame` class."""
+    server = pgnet.BaseServer(MyGame)
     asyncio.create_task(server.async_run())
     print("Shutting down the server in 3 seconds...")
     await asyncio.sleep(3)
