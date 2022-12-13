@@ -127,13 +127,14 @@ class BaseClient:
             await self._handle_user_connection(connection)
         except DisconnectedError as e:
             logger.debug(f"{e=}")
-            self._set_status(f"Disconnected: {e.args[0]}")
-        finally:
             if connection:
                 await connection.close()
             self._set_connection(False)
             self._server_connection = None
+            self._set_status(f"Disconnected: {e.args[0]}")
             logger.info(f"Connection terminated {self}")
+            return
+        logger.warning(f"Connection terminated without DisconnectedError {connection}")
 
     @property
     def connected(self) -> bool:
@@ -268,6 +269,7 @@ class BaseClient:
         """Set the client connection status with associated callback."""
         if self._connected == set_as:
             return
+        logger.debug(f"Setting connection as: {set_as}")
         self._connected = set_as
         if self.on_connection:
             self.on_connection(set_as)
