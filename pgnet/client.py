@@ -107,7 +107,10 @@ class BaseClient:
         if self._server_connection is not None:
             raise RuntimeError("Cannot open more than one connection per client.")
         full_address = f"{self.address}:{self.port}"
-        self._server_connection = websockets.connect(f"ws://{full_address}")
+        self._server_connection = websockets.connect(
+            f"ws://{full_address}",
+            close_timeout=1,
+        )
         self._set_status(f"Connecting to {full_address}...", logger.info)
         connection: Optional[ClientConnection] = None
         try:
