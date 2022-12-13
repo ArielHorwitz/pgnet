@@ -21,13 +21,26 @@ from .util import (
 class DevGame(BaseGame):
     """A subclass of BaseGame for simple testing purposes."""
 
+    persistent = True
+
+    def __init__(self, *args, save_string: Optional[str] = None, **kwargs):
+        """Initialization."""
+        super().__init__(*args, **kwargs)
+        self.log = list(save_string.splitlines()) if save_string else ["Game started"]
+
     def user_joined(self, username: str):
         """Overridden callback."""
         print(f"Joined: {username=}")
+        self.log.append(f"Joined: {username}")
 
     def user_left(self, username: str):
         """Overridden callback."""
         print(f"Left: {username=}")
+        self.log.append(f"Left: {username}")
+
+    def get_save_string(self) -> str:
+        """Overriden base method."""
+        return "\n".join(self.log)
 
 
 class DevClient:

@@ -12,6 +12,8 @@ password when listening globally.
 from loguru import logger
 from typing import Optional, Callable, Type, Any
 import asyncio
+import json
+from pathlib import Path
 import os
 import time
 import websockets
@@ -39,6 +41,7 @@ from .util import (
 
 MAX_USERNAME_LEN = 20
 SALT_SIZE = 20
+DEFAULT_SAVE_FILE = ".pgnet-server-data.json"
 
 
 @dataclass
@@ -88,7 +91,7 @@ class UserConnection(Connection):
 
 
 @dataclass
-class _LobbyGame:
+class LobbyGame:
     """BaseGame instance wrapper for management by server."""
 
     game: BaseGame
@@ -115,6 +118,11 @@ class _LobbyGame:
         if username in self.connected_users:
             self.connected_users.remove(username)
             self.game.user_left(username)
+
+    def get_save_string(self) -> Optional[str]:
+        if self.game.persistent:
+            return self.game.get_save_string()
+        return None
 
     @property
     def expired(self):
@@ -145,6 +153,7 @@ class BaseServer:
         registration_enabled: bool = True,
         on_connection: Optional[Callable[[str, bool], Any]] = None,
         verbose_logging: bool = False,
+        save_file: Optional[str | Path] = None,
     ):
         """Initialize the server.
 
@@ -155,15 +164,17 @@ class BaseServer:
             registration_enabled: Allow new users to register.
             on_connection: Callback for when a username connects or disconnects.
             verbose_logging: Log packets and responses.
+            save_file: Location of file to save and load server sessions.
         """
         self._key: Key = Key()
         self._stop: Optional[asyncio.Future] = None
         self._users: dict[str, User] = dict()
         self._register_user(ADMIN_USERNAME, admin_password)
-        self._games: dict[str, _LobbyGame] = {}
+        self._games: dict[str, LobbyGame] = {}
         self._connections: dict[str, Optional[UserConnection]] = {}
         self._kicked_users: set[str] = set()
         self._game_cls: Type[BaseGame] = game
+        self._save_file: Path = Path(save_file or DEFAULT_SAVE_FILE)
         self.address: str = address
         self.port: int = port
         self.registration_enabled: bool = registration_enabled
@@ -172,6 +183,7 @@ class BaseServer:
         logger.debug(f"{self._game_cls=}")
         logger.debug(f"{self._key=}")
         print(f"{admin_password=}")  # Use print instead of logger for password
+        self._load_from_disk()
 
     async def async_run(self, *, on_start: Optional[Callable] = None) -> int:
         """Start the server.
@@ -199,6 +211,7 @@ class BaseServer:
         except OSError as e:
             added = OSError(f"Server fail. Perhaps one is already running? {self}")
             raise added from e
+        self._save_to_disk()
         result = self._stop.result()
         logger.info(f"Server stop {result=} {self}")
         return result
@@ -387,11 +400,18 @@ class BaseServer:
             )
         return Response("See payload for games list.", dict(games=games_dict))
 
-    def _create_game(self, name: str, password: Optional[str] = None):
+    def _create_game(
+        self,
+        name: str,
+        password: Optional[str] = None,
+        game_data: Optional[str] = None,
+    ) -> LobbyGame:
         """Create a new game."""
         assert name not in self._games
-        game = self._game_cls(name)
-        self._games[name] = _LobbyGame(game, name, password)
+        game = self._game_cls(name, save_string=game_data)
+        lobbygame = LobbyGame(game, name, password)
+        self._games[name] = lobbygame
+        return lobbygame
 
     def _handle_join_game(self, packet: Packet) -> Response:
         """Handle a request to join the game specified in the payload."""
@@ -502,6 +522,11 @@ class BaseServer:
         self.kick_username(username)
         return Response(f"Kicked user {username!r}")
 
+    def _admin_save(self, packet: Packet) -> Response:
+        """Save all server data to file."""
+        self._save_to_disk()
+        return Response(f"Saved server data to disk: {self._save_file}")
+
     def _admin_verbose(self, packet: Packet) -> Response:
         """Toggle verbose logging.
 
@@ -541,6 +566,49 @@ class BaseServer:
         s = min(max_sleep, s)
         time.sleep(s)
         return Response(f"Slept for {s} seconds")
+
+    def _save_to_disk(self):
+        """Save all data to disk."""
+        game_data = []
+        for game in self._games.values():
+            save_string = game.get_save_string()
+            if not save_string:
+                continue
+            game_data.append(dict(
+                name=game.name,
+                password=game.password,
+                data=save_string,
+            ))
+        users = [
+            dict(name=u.name, salt=u.salt, password=u.hashed_password)
+            for u in self._users.values()
+        ]
+        data = dict(
+            users=users,
+            kicked_users=list(self._kicked_users),
+            games=game_data,
+            registration=self.registration_enabled,
+        )
+        dumped = json.dumps(data, indent=4)
+        self._save_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(self._save_file, "w") as f:
+            f.write(dumped)
+        print(f"Saved server data to {self._save_file}")
+
+    def _load_from_disk(self):
+        if not self._save_file.is_file():
+            return
+        print(f"Loading server data from {self._save_file}")
+        with open(self._save_file) as f:
+            data = f.read()
+        data = json.loads(data)
+        for user in data["users"]:
+            username = user["name"]
+            self._users[username] = User(username, user["salt"], user["password"])
+        for game in data["games"]:
+            self._create_game(game["name"], game["password"], game["data"])
+        self._kicked_users |= set(data["kicked_users"])
+        self.registration_enabled = data["registration"]
 
     _canned_lobby_response = Response(
         "Please create/join a game.",

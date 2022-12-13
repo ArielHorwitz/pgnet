@@ -237,13 +237,24 @@ class Connection:
 
 
 class BaseGame:
-    """Subclass this to implement the back end and pass to server as the game."""
+    """Subclass this to implement the back end and pass to server as the game.
+
+    If a game is not persistent (default), it will be deleted by the server
+    when all users have left. However if it is persistent, it will continue to
+    exists after all users have left, and it can save/load game data on disk
+    when the server shuts down and restarts.
+    """
 
     persistent: bool = False
     """Set the persistent to allow the game to persist even without players."""
 
-    def __init__(self, name: str):
-        """Initialized with the name given by the user that created the game."""
+    def __init__(self, name: str, save_string: Optional[str] = None):
+        """Initialized with the name given by the user that created the game.
+
+        Args:
+            name: Game name, as given by the user that opened the game.
+            save_string: Game data loaded from disk from last server session.
+        """
         self.name = name
 
     def user_joined(self, username: str):
@@ -260,3 +271,12 @@ class BaseGame:
             f"No packet handling configured for {self.__class__.__qualname__}",
             status=STATUS_UNEXPECTED,
         )
+
+    def get_save_string(self) -> str:
+        """Override this method to save game data to disk.
+
+        This method is called by the server when shutting down. In the next
+        session, the server will recreate the game with this string passed in
+        the __init__.
+        """
+        return ""
