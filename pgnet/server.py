@@ -357,6 +357,12 @@ class BaseServer:
             )
         return Response("See payload for games list.", dict(games=games_dict))
 
+    def _create_game(self, name: str, password: Optional[str] = None):
+        """Create a new game."""
+        assert name not in self._games
+        game = self._game_cls(name)
+        self._games[name] = _LobbyGame(game, name, password)
+
     def _handle_join_game(self, packet: Packet) -> Response:
         """Handle a request to join the game specified in the payload."""
         connection = self._connections[packet.username]
@@ -392,21 +398,16 @@ class BaseServer:
         current_game = connection.game
         if current_game:
             return Response("Must leave game first.", status=STATUS_UNEXPECTED)
-        name = packet.payload.get("name")
-        if not name:
+        game_name = packet.payload.get("name")
+        if not game_name:
             return Response("Missing non-empty name.", status=STATUS_UNEXPECTED)
-        if name in self._games:
+        if game_name in self._games:
             return Response("Name already exists.", status=STATUS_UNEXPECTED)
         password = packet.payload.get("password")
-        new_game = _LobbyGame(
-            self._game_cls(name),
-            name=name,
-            password=password,
-        )
-        self._games[new_game.name] = new_game
-        joined = new_game.add_user(packet.username, password)
+        game = self._create_game(game_name, password)
+        joined = game.add_user(packet.username, password)
         assert joined
-        connection.game = new_game.name
+        connection.game = game_name
         return Response("Created new game.")
 
     def _handle_game_packet(self, packet: Packet, game_name: str) -> Response:
