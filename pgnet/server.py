@@ -414,6 +414,14 @@ class BaseServer:
         self._games[name] = lobbygame
         return lobbygame
 
+    def _destroy_game(self, game_name: str):
+        """Destroy an existing game."""
+        game = self._games[game_name]
+        while game.connected_users:
+            self._remove_user_from_game(list(game.connected_users)[0])
+        if game_name in self._games:
+            del self._games[game_name]
+
     def _handle_join_game(self, packet: Packet) -> Response:
         """Handle a request to join the game specified in the payload."""
         connection = self._connections[packet.username]
@@ -528,10 +536,7 @@ class BaseServer:
         game_name = packet.payload.get("name", "")
         if game_name not in self._games:
             return Response(f"No such game: {game_name}", status=STATUS_UNEXPECTED)
-        game = self._games[game_name]
-        for username in game.connected_users:
-            self._remove_user_from_game(username)
-        del self._games[game_name]
+        self._destroy_game(game_name)
         return Response(f"Destroyed game: {game_name}")
 
     def _admin_save(self, packet: Packet) -> Response:
