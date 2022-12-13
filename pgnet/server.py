@@ -90,6 +90,11 @@ class _LobbyGame:
             self.connected_users.remove(username)
             self.game.remove_user(username)
 
+    @property
+    def expired(self):
+        """If the game is over and can be deleted."""
+        return not self.connected_users and not self.game.persistent
+
     def handle_packet(self, packet: Packet) -> Response:
         """Relay packet handling to game instance."""
         response = self.game.handle_packet(packet)
@@ -202,11 +207,6 @@ class BaseServer:
             logger.debug(f"{e=}")
         finally:
             logger.info(f"Closed connection: {connection}")
-            game = self._games.get(connection.game)
-            if game:
-                if not connection.username:
-                    logger.error(f"In game but no username! {connection}")
-                game.remove_user(connection.username)
             self._remove_user_connection(connection)
 
     async def _handle_handshake(self, connection: UserConnection):
@@ -284,7 +284,9 @@ class BaseServer:
         """Remove the connection from connected users table if exists."""
         username = connection.username
         if username not in self._user_connections:
+            # User is not connected
             return
+        self._remove_user_from_game(connection.username)
         del self._user_connections[username]
         if self.on_connection:
             self.on_connection(username, False)
@@ -333,6 +335,18 @@ class BaseServer:
             return self._canned_lobby_response
         return self._handle_game_packet(packet, game_name)
 
+    def _remove_user_from_game(self, username: str):
+        """Remove user from game and delete the game if expired."""
+        connection = self._user_connections[username]
+        game = self._games.get(connection.game)
+        if not game:
+            logger.debug(f"No game to remove from: {connection}")
+            return
+        connection.game = None
+        game.remove_user(username)
+        if game.expired:
+            del self._games[game.name]
+
     def _game_dir_response(self) -> Response:
         """Create a Response with dictionary of games details."""
         games_dict = {}
@@ -369,9 +383,7 @@ class BaseServer:
         name: Optional[str] = self._user_connections[packet.username].game
         if not name:
             return Response("Not in game.", status=STATUS_UNEXPECTED)
-        self._user_connections[packet.username].game = None
-        game = self._games.get(name)
-        game.remove_user(packet.username)
+        self._remove_user_from_game(packet.username)
         return Response("Left game.")
 
     def _handle_create_game(self, packet: Packet) -> Response:
@@ -406,8 +418,7 @@ class BaseServer:
         response: Response = game.handle_packet(packet)
         assert isinstance(response, Response)
         if response.disconnecting:
-            self._user_connections[packet.username].game = None
-            game.remove_user(packet.username)
+            self._remove_user_from_game(packet.username)
             response.disconnecting = False
         return response
 

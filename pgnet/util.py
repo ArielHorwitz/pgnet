@@ -239,6 +239,9 @@ class Connection:
 class BaseGame:
     """Subclass this to implement the back end and pass to server as the game."""
 
+    persistent: bool = False
+    """Set the persistent to allow the game to persist even without players."""
+
     def __init__(self, name: str):
         """Initialized with the name given by the user that created the game."""
         self.name = name
