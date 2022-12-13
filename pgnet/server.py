@@ -495,6 +495,7 @@ class BaseServer:
                 f" -- {g.name:<40} | {', '.join(str(u) for u in g.connected_users)}"
                 for name, g in sorted(self._games.items())
             ),
+            f"Pubkey: {self._key.pubkey}",
         ])
         return Response("Debug", dict(debug=debug))
 
