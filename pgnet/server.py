@@ -81,14 +81,14 @@ class _LobbyGame:
             logger.debug("Incorrect password.")
             return False
         self.connected_users.add(username)
-        self.game.add_user(username)
+        self.game.user_joined(username)
         return True
 
     def remove_user(self, username):
         """Remove user from game."""
         if username in self.connected_users:
             self.connected_users.remove(username)
-            self.game.remove_user(username)
+            self.game.user_left(username)
 
     @property
     def expired(self):

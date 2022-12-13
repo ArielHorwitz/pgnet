@@ -246,11 +246,11 @@ class BaseGame:
         """Initialized with the name given by the user that created the game."""
         self.name = name
 
-    def add_user(self, username: str):
+    def user_joined(self, username: str):
         """Called when a user joins the game."""
         pass
 
-    def remove_user(self, username: str):
+    def user_left(self, username: str):
         """Called when a user leaves the game."""
         pass
 

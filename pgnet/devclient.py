@@ -21,13 +21,13 @@ from .util import (
 class DevGame(BaseGame):
     """A subclass of BaseGame for simple testing purposes."""
 
-    def add_user(self, username: str):
+    def user_joined(self, username: str):
         """Overridden callback."""
-        print(f"Add: {username=}")
+        print(f"Joined: {username=}")
 
-    def remove_user(self, username: str):
+    def user_left(self, username: str):
         """Overridden callback."""
-        print(f"Remove: {username=}")
+        print(f"Left: {username=}")
 
 
 class DevClient:
