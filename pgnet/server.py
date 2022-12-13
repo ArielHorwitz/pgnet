@@ -180,6 +180,7 @@ class BaseServer:
         self.registration_enabled: bool = registration_enabled
         self.on_connection: Optional[Callable[[str, bool], Any]] = on_connection
         self.verbose_logging: bool = verbose_logging
+        logger.debug(f"{self._save_file=}")
         logger.debug(f"{self._game_cls=}")
         logger.debug(f"{self._key=}")
         print(f"{admin_password=}")  # Use print instead of logger for password
@@ -521,6 +522,17 @@ class BaseServer:
         username = packet.payload.get("username", "")
         self.kick_username(username)
         return Response(f"Kicked user {username!r}")
+
+    def _admin_destroy(self, packet: Packet) -> Response:
+        """Destroy the game specified in payload."""
+        game_name = packet.payload.get("name", "")
+        if game_name not in self._games:
+            return Response(f"No such game: {game_name}", status=STATUS_UNEXPECTED)
+        game = self._games[game_name]
+        for username in game.connected_users:
+            self._remove_user_from_game(username)
+        del self._games[game_name]
+        return Response(f"Destroyed game: {game_name}")
 
     def _admin_save(self, packet: Packet) -> Response:
         """Save all server data to file."""
