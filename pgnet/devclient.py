@@ -128,7 +128,12 @@ def run():
     asyncio.run(async_run(remote=remote))
 
 
-async def async_run(*, remote: bool = False, game: Type[BaseGame] = DevGame):
+async def async_run(
+    *,
+    remote: bool = False,
+    game: Type[BaseGame] = DevGame,
+    server_kwargs: Optional[dict] = None,
+) -> int:
     """Run the CLI client for admins and developers."""
     username = ADMIN_USERNAME
     password = DEFAULT_ADMIN_PASSWORD
@@ -156,6 +161,7 @@ async def async_run(*, remote: bool = False, game: Type[BaseGame] = DevGame):
             game=game,
             username=ADMIN_USERNAME,
             password=DEFAULT_ADMIN_PASSWORD,
+            server_kwargs=server_kwargs,
             **kw,
         )
-    return await DevClient(client).run()
+    await DevClient(client).run()

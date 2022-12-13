@@ -5,7 +5,7 @@ server when connecting, emulating a real server and maintaining the same
 client interface.
 """
 
-from typing import Type
+from typing import Type, Optional
 import asyncio
 from . import client
 from . import server
@@ -15,11 +15,17 @@ from .util import BaseGame, DEFAULT_PORT
 class LocalhostClientMixin:
     """See module documentation for details."""
 
-    def __init__(self, game: Type[BaseGame], **client_kwargs):
+    def __init__(
+        self,
+        game: Type[BaseGame],
+        server_kwargs: Optional[dict] = None,
+        **client_kwargs,
+    ):
         """See module documentation for details.
 
         Args:
             game: The game class for the server.
+            server_kwargs: Keyword arguments for the server.
             client_kwargs: Keyword arguments for the client.
         """
         client_kwargs.setdefault("username", "Player")
@@ -27,7 +33,11 @@ class LocalhostClientMixin:
         client_kwargs["address"] = "localhost"
         client_kwargs["port"] = DEFAULT_PORT
         super().__init__(**client_kwargs)
-        self._server = server.BaseServer(game)
+        if server_kwargs is None:
+            server_kwargs = dict()
+        server_kwargs["address"] = "localhost"
+        server_kwargs["port"] = DEFAULT_PORT
+        self._server = server.BaseServer(game, **server_kwargs)
 
     async def async_connect(self, *args, **kwargs):
         """Start a server, then connect."""
