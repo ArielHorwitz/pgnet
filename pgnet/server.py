@@ -12,6 +12,7 @@ password when listening globally.
 from loguru import logger
 from typing import Optional, Callable, Type, Any
 import asyncio
+import os
 import time
 import websockets
 from dataclasses import dataclass, field
@@ -37,11 +38,36 @@ from .util import (
 
 
 MAX_USERNAME_LEN = 20
+SALT_SIZE = 20
 
 
-def hash_password(password: str) -> str:
-    """Hash a string using Python's hashlib."""
-    return hashlib.sha256(password.encode()).hexdigest()
+@dataclass
+class User:
+    """User authentication info."""
+
+    name: str
+    salt: str
+    hashed_password: str
+
+    @classmethod
+    def from_name_password(cls, name: str, password: str):
+        """Create a new user from a raw (unsalted/unhashed) password."""
+        salt = cls._generate_salt()
+        hashed_password = cls._hash_password(password, salt)
+        return cls(name, salt=salt, hashed_password=hashed_password)
+
+    def compare_password(self, password: str):
+        """Compare a raw (unsalted/unhashed) password to our password."""
+        return self._hash_password(password, self.salt) == self.hashed_password
+
+    @staticmethod
+    def _generate_salt() -> str:
+        return os.urandom(SALT_SIZE).hex()
+
+    @staticmethod
+    def _hash_password(password: str, salt: str) -> str:
+        """Hash a string using Python's hashlib."""
+        return hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
 
 
 @dataclass
@@ -132,9 +158,8 @@ class BaseServer:
         """
         self._key: Key = Key()
         self._stop: Optional[asyncio.Future] = None
-        self._passwords: dict[str, str] = {
-            ADMIN_USERNAME: hash_password(admin_password),
-        }
+        self._users: dict[str, User] = dict()
+        self._register_user(ADMIN_USERNAME, admin_password)
         self._games: dict[str, _LobbyGame] = {}
         self._connections: dict[str, Optional[UserConnection]] = {}
         self._kicked_users: set[str] = set()
@@ -234,8 +259,6 @@ class BaseServer:
         packet = await connection.recv()
         username = packet.payload.get("username")
         password = packet.payload.get("password")
-        if password:
-            password = hash_password(password)
         fail = self._check_auth(username, password)
         if fail:
             # Respond with problem and disconnect
@@ -256,21 +279,28 @@ class BaseServer:
             return "Username kicked."
         if username in self._connections:
             return "Username already connected."
-        if username not in self._passwords:
+        if username not in self._users:
             not_admin = ADMIN_USERNAME.lower() not in username.lower()
             not_long = len(username) <= MAX_USERNAME_LEN
             name_allowed = not_admin and not_long
             if self.registration_enabled and name_allowed:
-                self._passwords[username] = password
-                logger.info(f"Registered {username=}")
+                self._register_user(username, password)
                 return None
             elif not self.registration_enabled:
                 return "Username not found, registration blocked."
             else:
                 return "Username not allowed."
-        if password != self._passwords.get(username):
+        user = self._users[username]
+        if not user.compare_password(password):
             return "Incorrect password."
         return None
+
+    def _register_user(self, username: str, password: str, /):
+        """Register new user."""
+        assert username not in self._users
+        user = User.from_name_password(username, password)
+        self._users[username] = user
+        logger.info(f"Registered {username=}")
 
     def _add_user_connection(self, connection: UserConnection):
         """Add the connection to connected users table."""
@@ -483,7 +513,7 @@ class BaseServer:
 
     def _admin_debug(self, packet: Packet) -> Response:
         """Return debugging info."""
-        non_kicked = set(self._passwords.keys()) - self._kicked_users
+        non_kicked = set(self._users.keys()) - self._kicked_users
         debug = "\n".join([
             packet.debug_repr,
             "Kicked users:",
