@@ -136,15 +136,15 @@ class BaseServer:
             ADMIN_USERNAME: hash_password(admin_password),
         }
         self._games: dict[str, _LobbyGame] = {}
-        self._user_connections: dict[str, Optional[UserConnection]] = {}
+        self._connections: dict[str, Optional[UserConnection]] = {}
         self._kicked_users: set[str] = set()
-        self._game: Type[BaseGame] = game
+        self._game_cls: Type[BaseGame] = game
         self.address: str = address
         self.port: int = port
         self.registration_enabled: bool = registration_enabled
         self.on_connection: Optional[Callable[[str, bool], Any]] = on_connection
         self.verbose_logging: bool = verbose_logging
-        logger.debug(f"{self._game=}")
+        logger.debug(f"{self._game_cls=}")
         logger.debug(f"{self._key=}")
         print(f"{admin_password=}")  # Use print instead of logger for password
 
@@ -254,7 +254,7 @@ class BaseServer:
             return "Missing non-empty username."
         if username in self._kicked_users:
             return "Username kicked."
-        if username in self._user_connections:
+        if username in self._connections:
             return "Username already connected."
         if username not in self._passwords:
             not_admin = ADMIN_USERNAME.lower() not in username.lower()
@@ -275,19 +275,18 @@ class BaseServer:
     def _add_user_connection(self, connection: UserConnection):
         """Add the connection to connected users table."""
         username = connection.username
-        assert username not in self._user_connections
-        self._user_connections[username] = connection
+        assert username not in self._connections
+        self._connections[username] = connection
         if self.on_connection:
             self.on_connection(username, True)
 
     def _remove_user_connection(self, connection: UserConnection):
         """Remove the connection from connected users table if exists."""
         username = connection.username
-        if username not in self._user_connections:
-            # User is not connected
+        if username not in self._connections:
             return
         self._remove_user_from_game(connection.username)
-        del self._user_connections[username]
+        del self._connections[username]
         if self.on_connection:
             self.on_connection(username, False)
 
@@ -310,7 +309,7 @@ class BaseServer:
                 logger.debug(f"--> {response}")
             assert isinstance(response, Response)
             # Also important, to set the game of the response for the client.
-            response.game = self._user_connections[username].game
+            response.game = self._connections[username].game
             await connection.send(response)
             # The packet handler may have determined we are disconnecting
             if response.disconnecting:
@@ -330,14 +329,14 @@ class BaseServer:
             response = self._handle_admin_packet(packet)
             if response:
                 return response
-        game_name: Optional[str] = self._user_connections[packet.username].game
+        game_name: Optional[str] = self._connections[packet.username].game
         if not game_name:
             return self._canned_lobby_response
         return self._handle_game_packet(packet, game_name)
 
     def _remove_user_from_game(self, username: str):
         """Remove user from game and delete the game if expired."""
-        connection = self._user_connections[username]
+        connection = self._connections[username]
         game = self._games.get(connection.game)
         if not game:
             logger.debug(f"No game to remove from: {connection}")
@@ -360,7 +359,8 @@ class BaseServer:
 
     def _handle_join_game(self, packet: Packet) -> Response:
         """Handle a request to join the game specified in the payload."""
-        current_name: Optional[str] = self._user_connections[packet.username].game
+        connection = self._connections[packet.username]
+        current_name: Optional[str] = connection.game
         if current_name:
             return Response("Must leave game first.", status=STATUS_UNEXPECTED)
         new_name: Optional[str] = packet.payload.get("name")
@@ -375,12 +375,12 @@ class BaseServer:
         success = game.add_user(packet.username, password)
         if not success:
             return Response("Failed to join.", status=STATUS_UNEXPECTED)
-        self._user_connections[packet.username].game = new_name
+        connection.game = new_name
         return Response("Joined game.")
 
     def _handle_leave_game(self, packet: Packet) -> Response:
         """Handle a request to leave the game."""
-        name: Optional[str] = self._user_connections[packet.username].game
+        name: Optional[str] = self._connections[packet.username].game
         if not name:
             return Response("Not in game.", status=STATUS_UNEXPECTED)
         self._remove_user_from_game(packet.username)
@@ -388,7 +388,8 @@ class BaseServer:
 
     def _handle_create_game(self, packet: Packet) -> Response:
         """Handle request to create a new game specified in the payload."""
-        current_game = self._user_connections[packet.username].game
+        connection = self._connections[packet.username]
+        current_game = connection.game
         if current_game:
             return Response("Must leave game first.", status=STATUS_UNEXPECTED)
         name = packet.payload.get("name")
@@ -398,14 +399,14 @@ class BaseServer:
             return Response("Name already exists.", status=STATUS_UNEXPECTED)
         password = packet.payload.get("password")
         new_game = _LobbyGame(
-            self._game(name),
+            self._game_cls(name),
             name=name,
             password=password,
         )
         self._games[new_game.name] = new_game
         joined = new_game.add_user(packet.username, password)
         assert joined
-        self._user_connections[packet.username].game = new_game.name
+        connection.game = new_game.name
         return Response("Created new game.")
 
     def _handle_game_packet(self, packet: Packet, game_name: str) -> Response:
@@ -489,7 +490,7 @@ class BaseServer:
             "All users:",
             *(f" -- {u}" for u in sorted(non_kicked)),
             "Connected users:",
-            *(f"  {conn}" for u, conn in sorted(self._user_connections.items())),
+            *(f"  {conn}" for u, conn in sorted(self._connections.items())),
             "Games:",
             *(
                 f" -- {g.name:<40} | {', '.join(str(u) for u in g.connected_users)}"
