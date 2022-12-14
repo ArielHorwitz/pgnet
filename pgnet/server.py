@@ -11,6 +11,7 @@ password when listening globally.
 
 from loguru import logger
 from typing import Optional, Callable, Type, Any
+import arrow
 import asyncio
 import json
 from pathlib import Path
@@ -39,6 +40,7 @@ from .util import (
 )
 
 
+AUTOSAVE_INTERVAL = 300  # 5 minutes
 MAX_USERNAME_LEN = 20
 SALT_SIZE = 20
 DEFAULT_SAVE_FILE = ".pgnet-server-data.json"
@@ -180,7 +182,7 @@ class BaseServer:
         self.registration_enabled: bool = registration_enabled
         self.on_connection: Optional[Callable[[str, bool], Any]] = on_connection
         self.verbose_logging: bool = verbose_logging
-        logger.debug(f"{self._save_file=}")
+        logger.debug(f"{self._save_file.absolute()=}")
         logger.debug(f"{self._game_cls=}")
         logger.debug(f"{self._key=}")
         print(f"{admin_password=}")  # Use print instead of logger for password
@@ -208,7 +210,12 @@ class BaseServer:
                 logger.info(f"Handling messages {self}")
                 if on_start:
                     on_start()
-                await self._stop
+                next_autosave = arrow.now().shift(seconds=AUTOSAVE_INTERVAL)
+                while not self._stop.done():
+                    await asyncio.sleep(0.1)
+                    if arrow.now() >= next_autosave:
+                        self._save_to_disk()
+                        next_autosave = arrow.now().shift(seconds=AUTOSAVE_INTERVAL)
         except OSError as e:
             added = OSError(f"Server fail. Perhaps one is already running? {self}")
             raise added from e
@@ -598,7 +605,7 @@ class BaseServer:
             ))
         users = [
             dict(name=u.name, salt=u.salt, password=u.hashed_password)
-            for u in self._users.values()
+            for u in self._users.values() if u.name != ADMIN_USERNAME
         ]
         data = dict(
             users=users,
@@ -610,7 +617,7 @@ class BaseServer:
         self._save_file.parent.mkdir(parents=True, exist_ok=True)
         with open(self._save_file, "w") as f:
             f.write(dumped)
-        print(f"Saved server data to {self._save_file}")
+        logger.debug(f"Saved server data to {self._save_file}")
 
     def _load_from_disk(self):
         if not self._save_file.is_file():
@@ -621,6 +628,8 @@ class BaseServer:
         data = json.loads(data)
         for user in data["users"]:
             username = user["name"]
+            if username == ADMIN_USERNAME:
+                continue
             self._users[username] = User(username, user["salt"], user["password"])
         for game in data["games"]:
             self._create_game(game["name"], game["password"], game["data"])
