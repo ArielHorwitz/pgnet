@@ -28,16 +28,17 @@ class LocalhostClientMixin:
             server_kwargs: Keyword arguments for the server.
             client_kwargs: Keyword arguments for the client.
         """
-        client_kwargs.setdefault("username", "Player")
-        client_kwargs.setdefault("password", "")
-        client_kwargs["address"] = "localhost"
-        client_kwargs["port"] = DEFAULT_PORT
-        super().__init__(**client_kwargs)
         if server_kwargs is None:
             server_kwargs = dict()
         server_kwargs["address"] = "localhost"
         server_kwargs["port"] = DEFAULT_PORT
         self._server = server.BaseServer(game, **server_kwargs)
+        client_kwargs.setdefault("username", "Player")
+        client_kwargs.setdefault("password", "")
+        client_kwargs["address"] = "localhost"
+        client_kwargs["port"] = DEFAULT_PORT
+        client_kwargs["verify_server_pubkey"] = self._server.pubkey
+        super().__init__(**client_kwargs)
 
     async def async_connect(self, *args, **kwargs):
         """Start a server, then connect."""

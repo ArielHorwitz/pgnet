@@ -233,6 +233,11 @@ class BaseServer:
             return
         self._kicked_users.add(username)
 
+    @property
+    def pubkey(self) -> str:
+        """Public key for end to end encryption."""
+        return self._key.pubkey
+
     async def _listening_loop(self, stop_future: asyncio.Future):
         next_autosave = arrow.now().shift(seconds=AUTOSAVE_INTERVAL)
         next_interval = arrow.now().shift(seconds=GAME_UPDATE_INTERVAL)
@@ -282,7 +287,7 @@ class BaseServer:
             )
             await connection.send(response)
             raise DisconnectedError("Incompatible protocol: missing pubkey.")
-        response = Response("key_trade", dict(pubkey=self._key.pubkey))
+        response = Response("key_trade", dict(pubkey=self.pubkey))
         await connection.send(response)
         connection.tunnel = self._key.get_tunnel(pubkey)
         logger.debug(f"Assigned tunnel: {connection}")
@@ -582,7 +587,7 @@ class BaseServer:
             *(f"  {conn}" for u, conn in sorted(self._connections.items())),
             "Games:",
             *(f"  {game}" for name, game in sorted(self._games.items())),
-            f"Pubkey: {self._key.pubkey}",
+            f"Pubkey: {self.pubkey}",
         ])
         return Response("Debug", dict(debug=debug))
 
