@@ -624,12 +624,15 @@ class BaseServer:
         self._save_file.parent.mkdir(parents=True, exist_ok=True)
         with open(self._save_file, "w") as f:
             f.write(dumped)
-        logger.debug(f"Saved server data to {self._save_file}")
+        logger.debug(
+            f"Saved server data to {self._save_file}"
+            f" ({len(users)} users and {len(game_data)} games)"
+        )
 
     def _load_from_disk(self):
         if not self._save_file.is_file():
             return
-        print(f"Loading server data from {self._save_file}")
+        logger.info(f"Loading server data from {self._save_file}")
         with open(self._save_file) as f:
             data = f.read()
         data = json.loads(data)
@@ -637,11 +640,15 @@ class BaseServer:
             username = user["name"]
             if username == ADMIN_USERNAME:
                 continue
-            self._users[username] = User(username, user["salt"], user["password"])
+            self._users[username] = u = User(username, user["salt"], user["password"])
+            logger.debug(f"Loaded: {u}")
         for game in data["games"]:
-            self._create_game(game["name"], game["password"], game["data"])
+            game_name = game["name"]
+            self._create_game(game_name, game["password"], game["data"])
+            logger.debug(f"Loaded: {self._games[game_name]}")
         self._kicked_users |= set(data["kicked_users"])
         self.registration_enabled = data["registration"]
+        logger.debug("Loading disk data complete.")
 
     _canned_lobby_response = Response(
         "Please create/join a game.",
