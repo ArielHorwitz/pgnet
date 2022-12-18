@@ -97,7 +97,7 @@ class UserConnection(Connection):
 class LobbyGame:
     """BaseGame instance wrapper for management by server."""
 
-    game: BaseGame
+    game: BaseGame = field(repr=False)
     name: str
     password: Optional[str]
     connected_users: set[str] = field(default_factory=set)
@@ -141,10 +141,6 @@ class LobbyGame:
     def update(self):
         """Called on an interval by the server."""
         self.game.update()
-
-    def __repr__(self) -> str:
-        """Object repr."""
-        return f"<{self.__class__.__qualname__} {self.name!r} {id(self)}>"
 
 
 class BaseServer:
@@ -586,10 +582,7 @@ class BaseServer:
             "Connected users:",
             *(f"  {conn}" for u, conn in sorted(self._connections.items())),
             "Games:",
-            *(
-                f" -- {g.name:<40} | {', '.join(str(u) for u in g.connected_users)}"
-                for name, g in sorted(self._games.items())
-            ),
+            *(f"  {game}" for name, game in sorted(self._games.items())),
             f"Pubkey: {self._key.pubkey}",
         ])
         return Response("Debug", dict(debug=debug))
