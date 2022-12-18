@@ -66,6 +66,7 @@ class BaseClient:
         on_connection: Optional[Callable[[bool], Any]] = None,
         on_status: Optional[Callable[[str], Any]] = None,
         on_game: Optional[Callable[[Optional[str]], Any]] = None,
+        heartbeat_interval: float = 0.2,
     ):
         """See module documentation for details.
 
@@ -80,6 +81,8 @@ class BaseClient:
             on_connection: Callback for when connecting or disconnecting.
             on_status: Callback for when client's status changes.
             on_game: Callback for when joining or leaving a game.
+            heartbeat_interval: Interval in seconds for periodically calling
+                `self.heartbeat` when connected and in game.
         """
         self._key: Key = Key()
         self._status: str = "New client."
@@ -88,6 +91,7 @@ class BaseClient:
         self._do_close: bool = False
         self._packet_queue: list[tuple[Packet, ResponseCallback]] = []
         self._game: Optional[str] = None
+        self._heartbeat_interval = heartbeat_interval
         self.address: str = address
         self.port: int = port
         self.username: str = username
@@ -113,6 +117,7 @@ class BaseClient:
         )
         self._set_status(f"Connecting to {full_address}...", logger.info)
         connection: Optional[ClientConnection] = None
+        heartbeat: Optional[asyncio.Task] = None
         try:
             try:
                 websocket = await self._server_connection
@@ -127,11 +132,14 @@ class BaseClient:
                 f"Logged in as {self.username} @ {connection.remote}",
                 logger.info,
             )
+            heartbeat = asyncio.create_task(self._async_heartbeat())
             await self._handle_user_connection(connection)
         except DisconnectedError as e:
             logger.debug(f"{e=}")
             if connection:
                 await connection.close()
+            if heartbeat:
+                heartbeat.cancel()
             self._set_connection(False)
             self._server_connection = None
             self._set_status(f"Disconnected: {e.args[0]}")
@@ -209,6 +217,22 @@ class BaseClient:
         if self._packet_queue:
             logger.debug(f"Discarding messages:  {self._packet_queue}")
         self._packet_queue = []
+
+    def heartbeat(self):
+        """Override this method to implement the heartbeat callback.
+
+        This method is called periodically in the background while connected
+        and in game. It is meant for client background tasks, such as
+        automatically updating the game state.
+        """
+        pass
+
+    async def _async_heartbeat(self):
+        """Periodically call `self.heartbeat` while connected and in game."""
+        while True:
+            await asyncio.sleep(self._heartbeat_interval)
+            if self.connected and self.game:
+                self.heartbeat()
 
     async def _handle_handshake(self, connection: ClientConnection):
         """Handle a new connection's handshake sequence. Modifies the connection object.
