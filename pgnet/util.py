@@ -280,3 +280,7 @@ class BaseGame:
         the __init__.
         """
         return ""
+
+    def update(self):
+        """Called on an interval by the server."""
+        pass

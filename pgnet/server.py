@@ -40,6 +40,7 @@ from .util import (
 )
 
 
+GAME_UPDATE_INTERVAL = 0.1
 AUTOSAVE_INTERVAL = 300  # 5 minutes
 MAX_USERNAME_LEN = 20
 SALT_SIZE = 20
@@ -122,6 +123,7 @@ class LobbyGame:
             self.game.user_left(username)
 
     def get_save_string(self) -> Optional[str]:
+        """Called by the server when shutting down."""
         if self.game.persistent:
             return self.game.get_save_string()
         return None
@@ -135,6 +137,10 @@ class LobbyGame:
         """Relay packet handling to game instance."""
         response = self.game.handle_packet(packet)
         return response
+
+    def update(self):
+        """Called on an interval by the server."""
+        self.game.update()
 
     def __repr__(self) -> str:
         """Object repr."""
@@ -210,12 +216,7 @@ class BaseServer:
                 logger.info(f"Handling messages {self}")
                 if on_start:
                     on_start()
-                next_autosave = arrow.now().shift(seconds=AUTOSAVE_INTERVAL)
-                while not self._stop.done():
-                    await asyncio.sleep(0.1)
-                    if arrow.now() >= next_autosave:
-                        self._save_to_disk()
-                        next_autosave = arrow.now().shift(seconds=AUTOSAVE_INTERVAL)
+                await self._listening_loop(self._stop)
         except OSError as e:
             added = OSError(f"Server fail. Perhaps one is already running? {self}")
             raise added from e
@@ -235,6 +236,19 @@ class BaseServer:
             logger.warning("Cannot kick admin.")
             return
         self._kicked_users.add(username)
+
+    async def _listening_loop(self, stop_future: asyncio.Future):
+        next_autosave = arrow.now().shift(seconds=AUTOSAVE_INTERVAL)
+        next_interval = arrow.now().shift(seconds=GAME_UPDATE_INTERVAL)
+        while not stop_future.done():
+            await asyncio.sleep(0.1)
+            if arrow.now() >= next_autosave:
+                self._save_to_disk()
+                next_autosave = arrow.now().shift(seconds=AUTOSAVE_INTERVAL)
+            if arrow.now() >= next_interval:
+                for game in self._games.values():
+                    game.update()
+                next_interval = arrow.now().shift(seconds=GAME_UPDATE_INTERVAL)
 
     async def _connection_handler(self, websocket: ServerWebSocket):
         """Handle new connections.
