@@ -400,7 +400,6 @@ class BaseServer:
         connection = self._connections[username]
         game = self._games.get(connection.game)
         if not game:
-            logger.debug(f"No game to remove from: {connection}")
             return
         connection.game = None
         game.remove_user(username)
