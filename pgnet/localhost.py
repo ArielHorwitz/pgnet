@@ -17,6 +17,7 @@ class LocalhostClientMixin:
 
     def __init__(
         self,
+        *,
         game: Type[BaseGame],
         server_kwargs: Optional[dict] = None,
         **client_kwargs,
