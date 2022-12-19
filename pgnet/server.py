@@ -4,9 +4,8 @@ Use `BaseServer.async_run` coroutine to start the server. To connect
 backend functionality, subclass from `BaseGame` and register it in the
 server.
 
-By default, the server is configured to listen on localhost. To listen
-globally, use address "". It is highly recommended to configure an admin
-password when listening globally.
+By default, the server is configured to listen on localhost. See
+`BaseServer.__init__` for more details.
 """
 
 from loguru import logger
@@ -151,9 +150,9 @@ class BaseServer:
         game: Type[BaseGame],
         /,
         *,
-        address: str = "localhost",
+        listen_globally: bool = False,
         port: int = DEFAULT_PORT,
-        admin_password: str = DEFAULT_ADMIN_PASSWORD,
+        admin_password: Optional[str] = None,
         registration_enabled: bool = True,
         on_connection: Optional[Callable[[str, bool], Any]] = None,
         verbose_logging: bool = False,
@@ -162,14 +161,19 @@ class BaseServer:
         """Initialize the server.
 
         Args:
-            address: Set to "" to listen globally (default: "localhost").
+            listen_globally: Listen globally instead of localhost only.
+                Requires that admin_password must be set.
             port: Port number to listen on.
             admin_password: Password for admin user with elevated priviliges.
+                Must be set to listen globally.
             registration_enabled: Allow new users to register.
             on_connection: Callback for when a username connects or disconnects.
             verbose_logging: Log packets and responses.
             save_file: Location of file to save and load server sessions.
         """
+        if listen_globally and not admin_password:
+            raise RuntimeError("Cannot listen globally without admin password.")
+        admin_password = admin_password or DEFAULT_ADMIN_PASSWORD
         self._key: Key = Key()
         self._stop: Optional[asyncio.Future] = None
         self._users: dict[str, User] = dict()
@@ -179,8 +183,8 @@ class BaseServer:
         self._kicked_users: set[str] = set()
         self._game_cls: Type[BaseGame] = game
         self._save_file: Path = Path(save_file or DEFAULT_SAVE_FILE)
-        self.address: str = address
-        self.port: int = port
+        self._address: str = "" if listen_globally else "localhost"
+        self._port: int = port
         self.registration_enabled: bool = registration_enabled
         self.on_connection: Optional[Callable[[str, bool], Any]] = on_connection
         self.verbose_logging: bool = verbose_logging
@@ -206,7 +210,7 @@ class BaseServer:
         if self._stop:
             raise RuntimeError("Can only run the server once per instance.")
         self._stop = asyncio.Future()
-        serving_args = (self._connection_handler, self.address, self.port)
+        serving_args = (self._connection_handler, self._address, self._port)
         try:
             async with websockets.serve(*serving_args):
                 logger.info(f"Handling messages {self}")
@@ -669,6 +673,6 @@ class BaseServer:
         """Object repr."""
         return (
             f"<{self.__class__.__qualname__} "
-            f"address={self.address!r} port={self.port!r} "
+            f"address={self._address!r} port={self._port!r} "
             f"{id(self)}>"
         )

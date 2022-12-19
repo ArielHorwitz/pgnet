@@ -31,8 +31,8 @@ class LocalhostClientMixin:
         """
         if server_kwargs is None:
             server_kwargs = dict()
-        server_kwargs["address"] = "localhost"
         server_kwargs["port"] = DEFAULT_PORT
+        server_kwargs["listen_globally"] = False
         self._server = server.BaseServer(game, **server_kwargs)
         client_kwargs.setdefault("username", "Player")
         client_kwargs.setdefault("password", "")
