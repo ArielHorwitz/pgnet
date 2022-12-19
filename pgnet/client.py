@@ -246,7 +246,7 @@ class BaseClient:
         pubkey = response.payload.get("pubkey")
         if not pubkey or not isinstance(pubkey, str):
             raise DisconnectedError("Missing public key string from server.")
-        if self.verify_server_pubkey:
+        if self.verify_server_pubkey is not None:
             if pubkey != self.verify_server_pubkey:
                 raise DisconnectedError("Unverified server public key.")
             logger.debug(f"Server pubkey verified: {pubkey=}")
