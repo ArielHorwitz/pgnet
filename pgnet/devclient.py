@@ -122,12 +122,6 @@ def _log_response(response: Response):
     print("=" * 20)
 
 
-def run():
-    """Run the CLI client as a main (non-async) entry point."""
-    remote = len(sys.argv) > 1 and sys.argv[1] == "-r"
-    asyncio.run(async_run(remote=remote))
-
-
 async def async_run(
     *,
     remote: bool = False,
@@ -158,10 +152,16 @@ async def async_run(
         )
     else:
         client = LocalhostClient(
-            game=game,
             username=ADMIN_USERNAME,
             password=DEFAULT_ADMIN_PASSWORD,
+            game=game,
             server_kwargs=server_kwargs,
             **kw,
         )
     await DevClient(client).run()
+
+
+def run():
+    """Main script entry point for the devclient."""
+    remote = len(sys.argv) > 1 and sys.argv[1] == "-r"
+    asyncio.run(async_run(remote=remote))
