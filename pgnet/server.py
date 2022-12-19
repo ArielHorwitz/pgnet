@@ -156,6 +156,7 @@ class BaseServer:
         port: int = DEFAULT_PORT,
         admin_password: Optional[str] = None,
         registration_enabled: bool = True,
+        require_user_password: bool = True,
         on_connection: Optional[Callable[[str, bool], Any]] = None,
         verbose_logging: bool = False,
         save_file: Optional[str | Path] = None,
@@ -169,6 +170,7 @@ class BaseServer:
             admin_password: Password for admin user with elevated priviliges.
                 Must be set to listen globally.
             registration_enabled: Allow new users to register.
+            require_user_password: Require that users have non-empty passwords.
             on_connection: Callback for when a username connects or disconnects.
             verbose_logging: Log packets and responses.
             save_file: Location of file to save and load server sessions.
@@ -178,6 +180,7 @@ class BaseServer:
         admin_password = admin_password or DEFAULT_ADMIN_PASSWORD
         self._key: Key = Key()
         self._stop: Optional[asyncio.Future] = None
+        self._require_user_password = require_user_password
         self._users: dict[str, User] = dict()
         self._register_user(ADMIN_USERNAME, admin_password)
         self._games: dict[str, LobbyGame] = {}
@@ -322,11 +325,18 @@ class BaseServer:
         if username in self._connections:
             return "Username already connected."
         if username not in self._users:
-            if self.registration_enabled and self._name_allowed(username):
+            missing_password = self._require_user_password and not password
+            if (
+                self.registration_enabled
+                and self._name_allowed(username)
+                and not missing_password
+            ):
                 self._register_user(username, password)
                 return None
             elif not self.registration_enabled:
                 return "Username not found, registration blocked."
+            elif missing_password:
+                return "User password required."
             else:
                 return "Username not allowed."
         user = self._users[username]
@@ -346,6 +356,8 @@ class BaseServer:
     def _register_user(self, username: str, password: str, /):
         """Register new user."""
         assert username not in self._users
+        if self._require_user_password and not password:
+            raise ValueError("Server requires password for users.")
         user = User.from_name_password(username, password)
         self._users[username] = user
         logger.info(f"Registered {username=}")
