@@ -14,6 +14,7 @@ import arrow
 import asyncio
 import json
 from pathlib import Path
+import re
 import os
 import time
 import websockets
@@ -42,6 +43,7 @@ from .util import (
 GAME_UPDATE_INTERVAL = 0.1
 AUTOSAVE_INTERVAL = 300  # 5 minutes
 MAX_USERNAME_LEN = 20
+RE_DISALLOWED_NAME = re.compile(r"\W")
 SALT_SIZE = 20
 DEFAULT_SAVE_FILE = ".pgnet-server-data.json"
 
@@ -320,10 +322,7 @@ class BaseServer:
         if username in self._connections:
             return "Username already connected."
         if username not in self._users:
-            not_admin = ADMIN_USERNAME.lower() not in username.lower()
-            not_long = len(username) <= MAX_USERNAME_LEN
-            name_allowed = not_admin and not_long
-            if self.registration_enabled and name_allowed:
+            if self.registration_enabled and self._name_allowed(username):
                 self._register_user(username, password)
                 return None
             elif not self.registration_enabled:
@@ -334,6 +333,15 @@ class BaseServer:
         if not user.compare_password(password):
             return "Incorrect password."
         return None
+
+    @staticmethod
+    def _name_allowed(name: str, /) -> bool:
+        """If a name is allowed."""
+        not_admin = ADMIN_USERNAME.lower() not in name.lower()
+        not_long = len(name) <= MAX_USERNAME_LEN
+        not_empty = len(name) > 0
+        no_whitespace = not bool(RE_DISALLOWED_NAME.search(name))
+        return not_admin and not_long and not_empty and no_whitespace
 
     def _register_user(self, username: str, password: str, /):
         """Register new user."""
@@ -458,6 +466,8 @@ class BaseServer:
             return Response("Please specify a game.", status=STATUS_UNEXPECTED)
         if new_name == current_name:
             return Response("Already in game.", status=STATUS_UNEXPECTED)
+        if not self._name_allowed(new_name):
+            return Response("Name not allowed.", status=STATUS_UNEXPECTED)
         game = self._games.get(new_name)
         if not game:
             return self._handle_create_game(packet)
@@ -648,10 +658,12 @@ class BaseServer:
             username = user["name"]
             if username == ADMIN_USERNAME:
                 continue
+            assert self._name_allowed(username)
             self._users[username] = u = User(username, user["salt"], user["password"])
             logger.debug(f"Loaded: {u}")
         for game in data["games"]:
             game_name = game["name"]
+            assert self._name_allowed(game_name)
             self._create_game(game_name, game["password"], game["data"])
             logger.debug(f"Loaded: {self._games[game_name]}")
         self._kicked_users |= set(data["kicked_users"])
