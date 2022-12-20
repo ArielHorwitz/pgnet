@@ -165,23 +165,41 @@ class BaseClient:
         """Get the games directory from the server and pass the response to callback."""
         self.send(Packet(REQUEST_GAME_DIR), callback, do_next=True)
 
-    def create_game(self, name: str, /, password: Optional[str] = None):
+    def create_game(
+        self,
+        name: str,
+        /,
+        password: Optional[str] = None,
+        *,
+        callback: Optional[ResponseCallback] = None,
+    ):
         """Request from the server to join a game."""
         payload = dict(name=name)
         if password:
             payload["password"] = password
-        self.send(Packet(REQUEST_CREATE_GAME, payload), do_next=True)
+        self.send(Packet(REQUEST_CREATE_GAME, payload), callback, do_next=True)
 
-    def join_game(self, name: str, /, password: Optional[str] = None):
+    def join_game(
+        self,
+        name: str,
+        /,
+        password: Optional[str] = None,
+        *,
+        callback: Optional[ResponseCallback] = None,
+    ):
         """Request from the server to join a game."""
         payload = dict(name=name)
         if password:
             payload["password"] = password
-        self.send(Packet(REQUEST_JOIN_GAME, payload), do_next=True)
+        self.send(Packet(REQUEST_JOIN_GAME, payload), callback, do_next=True)
 
-    def leave_game(self):
+    def leave_game(
+        self,
+        *,
+        callback: Optional[ResponseCallback] = None,
+    ):
         """Request from the server to leave the game."""
-        self.send(Packet(REQUEST_LEAVE_GAME), do_next=True)
+        self.send(Packet(REQUEST_LEAVE_GAME), callback, do_next=True)
 
     @property
     def game(self) -> Optional[str]:
