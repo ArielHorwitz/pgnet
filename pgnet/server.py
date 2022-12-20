@@ -43,7 +43,7 @@ from .util import (
 GAME_UPDATE_INTERVAL = 0.1
 AUTOSAVE_INTERVAL = 300  # 5 minutes
 MAX_USERNAME_LEN = 20
-RE_DISALLOWED_NAME = re.compile(r"\W")
+RE_WHITESPACE = re.compile(r"\W")
 SALT_SIZE = 20
 DEFAULT_SAVE_FILE = ".pgnet-server-data.json"
 
@@ -350,7 +350,7 @@ class BaseServer:
         not_admin = ADMIN_USERNAME.lower() not in name.lower()
         not_long = len(name) <= MAX_USERNAME_LEN
         not_empty = len(name) > 0
-        no_whitespace = not bool(RE_DISALLOWED_NAME.search(name))
+        no_whitespace = not bool(RE_WHITESPACE.search(name))
         return not_admin and not_long and not_empty and no_whitespace
 
     def _register_user(self, username: str, password: str, /):
@@ -478,8 +478,6 @@ class BaseServer:
             return Response("Please specify a game.", status=STATUS_UNEXPECTED)
         if new_name == current_name:
             return Response("Already in game.", status=STATUS_UNEXPECTED)
-        if not self._name_allowed(new_name):
-            return Response("Name not allowed.", status=STATUS_UNEXPECTED)
         game = self._games.get(new_name)
         if not game:
             return self._handle_create_game(packet)
@@ -505,8 +503,8 @@ class BaseServer:
         if current_game:
             return Response("Must leave game first.", status=STATUS_UNEXPECTED)
         game_name = packet.payload.get("name")
-        if not game_name:
-            return Response("Missing non-empty name.", status=STATUS_UNEXPECTED)
+        if not self._name_allowed(game_name):
+            return Response("Name not allowed.", status=STATUS_UNEXPECTED)
         if game_name in self._games:
             return Response("Name already exists.", status=STATUS_UNEXPECTED)
         password = packet.payload.get("password")
