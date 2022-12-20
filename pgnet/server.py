@@ -108,14 +108,13 @@ class LobbyGame:
         """If the game is password protected."""
         return bool(self.password)
 
-    def add_user(self, username: str, password: str) -> bool:
-        """Return if user was successfully added."""
+    def add_user(self, username: str, password: str) -> Optional[str]:
+        """Return reason if user was not successfully added."""
         if password != self.password:
-            logger.debug("Incorrect password.")
-            return False
+            return "Incorrect password."
         self.connected_users.add(username)
         self.game.user_joined(username)
-        return True
+        return None
 
     def remove_user(self, username):
         """Remove user from game."""
@@ -482,9 +481,9 @@ class BaseServer:
         if not game:
             return self._handle_create_game(packet)
         password = packet.payload.get("password")
-        success = game.add_user(packet.username, password)
-        if not success:
-            return Response("Failed to join.", status=STATUS_UNEXPECTED)
+        fail = game.add_user(packet.username, password)
+        if fail:
+            return Response(f"Failed to join: {fail}", status=STATUS_UNEXPECTED)
         connection.game = new_name
         return Response("Joined game.")
 
@@ -509,8 +508,8 @@ class BaseServer:
             return Response("Name already exists.", status=STATUS_UNEXPECTED)
         password = packet.payload.get("password")
         game = self._create_game(game_name, password)
-        joined = game.add_user(packet.username, password)
-        assert joined
+        fail = game.add_user(packet.username, password)
+        assert not fail
         connection.game = game_name
         return Response("Created new game.")
 
