@@ -255,7 +255,7 @@ class BaseGame:
             name: Game name, as given by the user that opened the game.
             save_string: Game data loaded from disk from last server session.
         """
-        self.name = name
+        pass
 
     def user_joined(self, username: str):
         """Called when a user joins the game."""
