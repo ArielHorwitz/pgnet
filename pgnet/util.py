@@ -57,14 +57,22 @@ class Packet:
 
     def serialize(self) -> dict:
         """Convert into a string."""
-        return json.dumps({
-            k: getattr(self, k) for k in self.__dataclass_fields__.keys()
-        })
+        data = {k: getattr(self, k) for k in self.__dataclass_fields__.keys()}
+        try:
+            return json.dumps(data)
+        except Exception as e:
+            m = f"Failed to serialize. See above exception.\n{self.debug_repr}"
+            raise TypeError(m) from e
 
     @classmethod
     def deserialize(cls, raw_data: str, /) -> "Packet":
         """Convert a string into a Packet."""
-        return cls(**json.loads(raw_data))
+        try:
+            data = json.loads(raw_data)
+        except Exception as e:
+            m = f"Failed to deserialize. See above exception.\n{raw_data=}"
+            raise TypeError(m) from e
+        return cls(**data)
 
     @property
     def debug_repr(self) -> str:
@@ -92,14 +100,22 @@ class Response:
 
     def serialize(self) -> dict:
         """Convert into a string."""
-        return json.dumps({
-            k: getattr(self, k) for k in self.__dataclass_fields__.keys()
-        })
+        data = {k: getattr(self, k) for k in self.__dataclass_fields__.keys()}
+        try:
+            return json.dumps(data)
+        except Exception as e:
+            m = f"Failed to serialize. See above exception.\n{self.debug_repr}"
+            raise TypeError(m) from e
 
     @classmethod
     def deserialize(cls, raw_data: str, /) -> "Response":
         """Convert a string into a Response."""
-        return cls(**json.loads(raw_data))
+        try:
+            data = json.loads(raw_data)
+        except Exception as e:
+            m = f"Failed to deserialize. See above exception.\n{raw_data=}"
+            raise TypeError(m) from e
+        return cls(**data)
 
     @property
     def debug_repr(self) -> str:
