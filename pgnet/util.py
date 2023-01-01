@@ -19,6 +19,7 @@ REQUEST_GAME_DIR = "server.game_dir"
 REQUEST_JOIN_GAME = "server.join_game"
 REQUEST_LEAVE_GAME = "server.leave_game"
 REQUEST_CREATE_GAME = "server.create_game"
+REQUEST_HEARTBEAT_UPDATE = "server.heartbeat_update"
 STATUS_OK = 0
 STATUS_BAD = 1
 STATUS_UNEXPECTED = 2
@@ -284,10 +285,26 @@ class BaseGame:
         pass
 
     def handle_packet(self, packet: Packet) -> Response:
+        """Packet handling for heartbeat updates and game requests.
+
+        Prefer to override `BaseGame.handle_game_packet` and
+        `BaseGame.handle_heartbeat`.
+        """
+        if packet.message == REQUEST_HEARTBEAT_UPDATE:
+            return self.handle_heartbeat(packet)
+        return self.handle_game_packet(packet)
+
+    def handle_game_packet(self, packet: Packet) -> Response:
         """Override this method to implement packet handling."""
         return Response(
             f"No packet handling configured for {self.__class__.__qualname__}",
             status=STATUS_UNEXPECTED,
+        )
+
+    def handle_heartbeat(self, packet: Packet) -> Response:
+        """Override this method to implement heartbeat updates."""
+        return Response(
+            f"No heartbeat update configured for {self.__class__.__qualname__}"
         )
 
     def get_save_string(self) -> str:

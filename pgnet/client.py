@@ -23,6 +23,7 @@ from .util import (
     REQUEST_CREATE_GAME,
     REQUEST_JOIN_GAME,
     REQUEST_LEAVE_GAME,
+    REQUEST_HEARTBEAT_UPDATE,
     STATUS_OK,
 )
 
@@ -234,21 +235,34 @@ class BaseClient:
             logger.debug(f"Discarding messages:  {self._packet_queue}")
         self._packet_queue = []
 
-    def heartbeat(self):
-        """Override this method to implement the heartbeat callback.
+    def on_heartbeat(self, heartbeat: Response):
+        """Override this method to implement heartbeat updates.
 
-        This method is called periodically in the background while connected
-        and in game. It is meant for client background tasks, such as
-        automatically updating the game state.
+        The *heartbeat* Response is given by
+        `pgnet.util.BaseGame.handle_heartbeat`. The heartbeat rate is set by
+        `pgnet.util.BaseGame.heartbeat_rate`.
         """
         pass
 
+    def heartbeat_payload(self) -> dict:
+        """Override this method to add data to the heartbeat request payload.
+
+        This payload is passed to `pgnet.util.BaseGame.handle_heartbeat`. The
+        heartbeat rate is set by `pgnet.util.BaseGame.heartbeat_rate`.
+        """
+        return dict()
+
     async def _async_heartbeat(self):
-        """Periodically call `self.heartbeat` while connected and in game."""
+        """Periodically update while connected and in game.
+
+        Will create a heartbeat request using `BaseClient.heartbeat_payload`
+        and pass the response to `BaseClient.on_heartbeat`.
+        """
         while True:
             await asyncio.sleep(self._heartbeat_interval)
             if self.connected and self.game:
-                self.heartbeat()
+                packet = Packet(REQUEST_HEARTBEAT_UPDATE, self.heartbeat_payload())
+                self.send(packet, self.on_heartbeat)
 
     async def _handle_handshake(self, connection: ClientConnection):
         """Handle a new connection's handshake sequence. Modifies the connection object.
