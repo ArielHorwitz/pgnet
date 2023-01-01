@@ -1,12 +1,4 @@
-"""Base server class.
-
-Use `BaseServer.async_run` coroutine to start the server. To connect
-backend functionality, subclass from `BaseGame` and register it in the
-server.
-
-By default, the server is configured to listen on localhost. See
-`BaseServer.__init__` for more details.
-"""
+"""Home of the `BaseServer` class."""
 
 from loguru import logger
 from typing import Optional, Callable, Type, Any
@@ -149,7 +141,15 @@ class LobbyGame:
 
 
 class BaseServer:
-    """See module documentation for details."""
+    """The server that hosts games.
+
+    Subclass from `BaseGame` and pass it as the *game* argument for the server.
+    Then, use the `BaseServer.async_run` coroutine to start the server.
+
+    By default, the server is configured to listen on localhost. To listen
+    globally, set *`listen_globally`* and *`admin_password`*. Make sure that any
+    required network rules are set (e.g. port forwarding).
+    """
 
     def __init__(
         self,
@@ -176,7 +176,7 @@ class BaseServer:
             registration_enabled: Allow new users to register.
             require_user_password: Require that users have non-empty passwords.
             on_connection: Callback for when a username connects or disconnects.
-            verbose_logging: Log packets and responses.
+            verbose_logging: Log *all* packets and responses.
             save_file: Location of file to save and load server sessions.
         """
         if listen_globally and not admin_password:
@@ -702,3 +702,8 @@ class BaseServer:
             f"address={self._address!r} port={self._port!r} "
             f"{id(self)}>"
         )
+
+
+__all__ = (
+    "BaseServer",
+)

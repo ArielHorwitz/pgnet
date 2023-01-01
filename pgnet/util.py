@@ -1,4 +1,4 @@
-"""Common constants and classes."""
+"""Common utilities for pgnet."""
 
 from typing import Optional, Callable
 from loguru import logger
@@ -27,10 +27,9 @@ STATUS_UNEXPECTED = 2
 
 
 class DisconnectedError(Exception):
-    """Raised when a connection should no longer be open.
+    """Raised when a connection should is or should be closed.
 
-    It is expected that the cause of the error is passed as the first
-    argument as a string.
+    The cause of the error is passed as the first argument as a string.
     """
     pass
 
@@ -48,16 +47,22 @@ class Packet:
     """
 
     message: str
+    """Message text."""
     payload: dict = field(default_factory=dict, repr=False)
+    """Dictionary of arbitrary data."""
     created_on: Optional[str] = None
+    """The creation time of the packet."""
     username: Optional[str] = None
-    disconnecting: bool = False
+    """Used by the server for identification.
+
+    Setting this on the client side has no effect.
+    """
 
     def __post_init__(self):
         """Set creation date."""
         self.created_on = self.created_on or arrow.now().for_json()
 
-    def serialize(self) -> dict:
+    def serialize(self) -> str:
         """Convert into a string."""
         data = {k: getattr(self, k) for k in self.__dataclass_fields__.keys()}
         try:
@@ -90,17 +95,23 @@ class Response:
     """
 
     message: str
+    """Message text."""
     payload: dict = field(default_factory=dict, repr=False)
+    """Dictionary of arbitrary data."""
     status: int = STATUS_OK
+    """Status code for handling the request that this is responding to."""
     created_on: Optional[str] = None
+    """The creation time of the packet."""
     disconnecting: bool = False
+    """Used to notify that the connection is being closed."""
     game: Optional[str] = None
+    """The game name that this connection has joined."""
 
     def __post_init__(self):
         """Set creation date."""
         self.created_on = self.created_on or arrow.now().for_json()
 
-    def serialize(self) -> dict:
+    def serialize(self) -> str:
         """Convert into a string."""
         data = {k: getattr(self, k) for k in self.__dataclass_fields__.keys()}
         try:
@@ -255,25 +266,27 @@ class Connection:
 
 
 class BaseGame:
-    """Subclass this to implement the back end and pass to server as the game.
+    """Subclass to implement game logic.
 
-    If a game is not persistent (default), it will be deleted by the server
-    when all users have left. However if it is persistent, it will continue to
-    exists after all users have left, and it can save/load game data on disk
-    when the server shuts down and restarts.
+    This class should not be initialized directly, it is initialized by the
+    server.
     """
 
     persistent: bool = False
     """Set as persistent to allow the game to persist even without players."""
     heartbeat_rate: float = 10
-    """How many times per second the client should check for updates."""
+    """How many times per second the client should check for updates.
+
+    See `BaseGame.handle_heartbeat` and `pgnet.BaseClient.on_heartbeat`.
+    """
 
     def __init__(self, name: str, save_string: Optional[str] = None):
-        """Initialized with the name given by the user that created the game.
+        """The server initializes this class for every game started.
 
         Args:
-            name: Game name, as given by the user that opened the game.
-            save_string: Game data loaded from disk from last server session.
+            name: Game instance name.
+            save_string: Game data loaded from disk from last server session as
+                given by `BaseGame.get_save_string`.
         """
         pass
 
@@ -288,8 +301,8 @@ class BaseGame:
     def handle_packet(self, packet: Packet) -> Response:
         """Packet handling for heartbeat updates and game requests.
 
-        Prefer to override `BaseGame.handle_game_packet` and
-        `BaseGame.handle_heartbeat`.
+        Most cases should not override this method, rather override
+        `BaseGame.handle_game_packet` and `BaseGame.handle_heartbeat`.
         """
         if packet.message == REQUEST_HEARTBEAT_UPDATE:
             return self.handle_heartbeat(packet)
@@ -312,13 +325,16 @@ class BaseGame:
         """Override this method to save game data to disk.
 
         This method is called by the server when shutting down. In the next
-        session, the server will recreate the game with this string passed in
-        the __init__.
+        session, the server will recreate the game with this string passed as
+        *`save_string`* to `BaseGame.__init__`.
         """
         return ""
 
     def update(self):
-        """Called on an interval by the server."""
+        """Called on an interval by the server.
+
+        Override this method to implement background game logic tasks.
+        """
         pass
 
 
@@ -328,3 +344,11 @@ def enable_logging(enable: bool = True, /):
         logger.enable("pgnet")
     else:
         logger.disable("pgnet")
+
+
+__all__ = (
+    "BaseGame",
+    "Packet",
+    "Response",
+    "enable_logging",
+)

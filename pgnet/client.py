@@ -1,10 +1,4 @@
-"""Base client class.
-
-Use `BaseClient.async_connect` to connect to the server. Use `BaseClient.queue`
-to send packets and set a callback when a response returns.
-
-For extra security, use `verify_server_pubkey` when initializing a client.
-"""
+"""Home of the `BaseClient` class."""
 
 from typing import Optional, Callable, Any
 from loguru import logger
@@ -55,7 +49,24 @@ class ClientConnection(Connection):
 
 
 class BaseClient:
-    """See module documentation for details."""
+    """The client that manages communication with the server.
+
+    Use `BaseClient.async_connect` to connect to the server.
+
+    Once connected, use `BaseClient.get_games_dir`, `BaseClient.create_game`,
+    `BaseClient.join_game`, and `BaseClient.leave_game` to join or leave a game.
+
+    It is possible to bind callbacks to client events by setting
+    `BaseClient.on_connection`, `BaseClient.on_status`, and
+    `BaseClient.on_game`.
+
+    When in game (`BaseClient.game` is set), use `BaseClient.send` to send a
+    `pgnet.Packet` to `pgnet.BaseGame.handle_game_packet` and receive a
+    `pgnet.Response`.
+
+    For extra security, use `verify_server_pubkey` when initializing a client
+    (not required).
+    """
 
     def __init__(
         self,
@@ -72,15 +83,15 @@ class BaseClient:
         """See module documentation for details.
 
         Args:
-            address: Server IP address
-            port: Server port number
+            address: Server IP address.
+            port: Server port number.
             username: The user's username.
             password: The user's password.
             verify_server_pubkey: If set, will compare against the public
                 key of the server and disconnect if it's public key does
                 not match.
             on_connection: Callback for when connecting or disconnecting.
-            on_status: Callback for when client's status changes.
+            on_status: Callback for client status feedback.
             on_game: Callback for when joining or leaving a game.
         """
         self._key: Key = Key()
@@ -96,16 +107,20 @@ class BaseClient:
         self.username: str = username
         self.password: str = password
         self.verify_server_pubkey: Optional[str] = verify_server_pubkey
-        self.on_connection = on_connection
-        self.on_status = on_status
-        self.on_game = on_game
+        self.on_connection: Optional[Callable[[bool], Any]] = on_connection
+        """Callback for connection change event."""
+        self.on_status: Optional[Callable[[str], Any]] = on_status
+        """Callback for client status event."""
+        self.on_game: Optional[Callable[[str], Any]] = on_game
+        """Callback for game change event."""
 
     async def async_connect(self):
         """Connect to a server.
 
-        Allows the handshake to fully populate a ClientConnection, which may
-        then be used to process the packet queue. The client only considers
-        itself connected when the packet queue can be processed.
+        This procedure will automatically create an end-to-end encrypted
+        connection (optionally verifying the public key first), and authenticate
+        the username and password. Only after succesfully completing these steps
+        will the client be considered connected.
         """
         if self._server_connection is not None:
             raise RuntimeError("Cannot open more than one connection per client.")
@@ -202,7 +217,7 @@ class BaseClient:
 
     @property
     def game(self) -> Optional[str]:
-        """Currently joined game."""
+        """Currently joined game name."""
         return self._game
 
     def send(
@@ -212,9 +227,10 @@ class BaseClient:
         /,
         do_next: bool = False,
     ):
-        """Add a packet to the queue. Optionally configure a callback for the response.
+        """Add a packet to the queue.
 
-        Callbacks are not ensured, as a queue can be arbitrarily cleared using
+        If a callback was given, the response will be passed to it. Callbacks
+        are not ensured, as the queue can be arbitrarily cleared using
         `BaseClient.flush_queue`.
         """
         if not self._connected:
@@ -230,7 +246,7 @@ class BaseClient:
             self._packet_queue.append(packet_callback)
 
     def flush_queue(self):
-        """Remove any packets and their respective callbacks from the packet queue."""
+        """Clear packets and their respective callbacks from the queue."""
         if self._packet_queue:
             logger.debug(f"Discarding messages:  {self._packet_queue}")
         self._packet_queue = []
