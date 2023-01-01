@@ -16,11 +16,11 @@ from nacl.encoding import Base64Encoder
 DEFAULT_PORT = 38929
 ADMIN_USERNAME = "admin"
 DEFAULT_ADMIN_PASSWORD = "localhostadmin"
-REQUEST_GAME_DIR = "server.game_dir"
-REQUEST_JOIN_GAME = "server.join_game"
-REQUEST_LEAVE_GAME = "server.leave_game"
-REQUEST_CREATE_GAME = "server.create_game"
-REQUEST_HEARTBEAT_UPDATE = "server.heartbeat_update"
+REQUEST_GAME_DIR = "__pgnet__.game_dir"
+REQUEST_JOIN_GAME = "__pgnet__.join_game"
+REQUEST_LEAVE_GAME = "__pgnet__.leave_game"
+REQUEST_CREATE_GAME = "__pgnet__.create_game"
+REQUEST_HEARTBEAT_UPDATE = "__pgnet__.heartbeat_update"
 STATUS_OK = 0
 STATUS_BAD = 1
 STATUS_UNEXPECTED = 2
