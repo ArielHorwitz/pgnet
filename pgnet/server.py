@@ -104,6 +104,11 @@ class LobbyGame:
     connected_users: set[str] = field(default_factory=set)
 
     @property
+    def heartbeat_rate(self) -> float:
+        """Updates per second."""
+        return self.game.heartbeat_rate
+
+    @property
     def password_protected(self) -> bool:
         """If the game is password protected."""
         return bool(self.password)
@@ -485,7 +490,7 @@ class BaseServer:
         if fail:
             return Response(f"Failed to join: {fail}", status=STATUS_UNEXPECTED)
         connection.game = new_name
-        return Response("Joined game.")
+        return Response("Joined game.", dict(heartbeat_rate=game.heartbeat_rate))
 
     def _handle_leave_game(self, packet: Packet) -> Response:
         """Handle a request to leave the game."""
@@ -511,7 +516,7 @@ class BaseServer:
         fail = game.add_user(packet.username, password)
         assert not fail
         connection.game = game_name
-        return Response("Created new game.")
+        return Response("Created new game.", dict(heartbeat_rate=game.heartbeat_rate))
 
     def _handle_game_packet(self, packet: Packet, game_name: str) -> Response:
         """Routes a packet from a logged in user to the game's packet handler.

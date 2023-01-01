@@ -27,6 +27,7 @@ from .util import (
 )
 
 
+DEFAULT_HEARTBEAT_RATE = 10
 ResponseCallback = Callable[[Response], Any]
 
 
@@ -66,7 +67,6 @@ class BaseClient:
         on_connection: Optional[Callable[[bool], Any]] = None,
         on_status: Optional[Callable[[str], Any]] = None,
         on_game: Optional[Callable[[Optional[str]], Any]] = None,
-        heartbeat_interval: float = 0.2,
     ):
         """See module documentation for details.
 
@@ -81,8 +81,6 @@ class BaseClient:
             on_connection: Callback for when connecting or disconnecting.
             on_status: Callback for when client's status changes.
             on_game: Callback for when joining or leaving a game.
-            heartbeat_interval: Interval in seconds for periodically calling
-                `self.heartbeat` when connected and in game.
         """
         self._key: Key = Key()
         self._status: str = "New client."
@@ -91,7 +89,7 @@ class BaseClient:
         self._do_close: bool = False
         self._packet_queue: list[tuple[Packet, ResponseCallback]] = []
         self._game: Optional[str] = None
-        self._heartbeat_interval = heartbeat_interval
+        self._heartbeat_interval = 1 / DEFAULT_HEARTBEAT_RATE
         self.address: str = address
         self.port: int = port
         self.username: str = username
@@ -292,14 +290,13 @@ class BaseClient:
             response = await connection.send_recv(packet)
             if response.status != STATUS_OK:
                 logger.info(f"Status code: {response.debug_repr}")
+            self._handle_game_change(response)
             if callback:
                 callback(response)
             # Disconnect if alerted
             if response.disconnecting:
                 logger.info(f"Disconnected.\n{packet}\n{response.debug_repr}")
                 raise DisconnectedError(response.message)
-            # Handle changing games
-            self._set_game(response.game)
         raise DisconnectedError("Client closed connection.")
 
     def _set_status(self, status: str, logger: Optional[Callable] = None):
@@ -319,13 +316,20 @@ class BaseClient:
         if self.on_connection:
             self.on_connection(set_as)
 
-    def _set_game(self, game_name: Optional[str]):
-        """Set the client game name with associated callback."""
+    def _handle_game_change(self, response: Response):
+        """Handle game change.
+
+        Set the client game name and heartbeat rate, then call event callback.
+        """
+        game_name = response.game
         if game_name != self._game:
             if game_name is None:
                 self._set_status(f"Left game: {self._game}")
             else:
                 self._set_status(f"Joined game: {game_name}")
+            hb_rate = response.payload.get("heartbeat_rate", DEFAULT_HEARTBEAT_RATE)
+            self._heartbeat_interval = 1 / hb_rate
+            logger.debug(f"{self._heartbeat_interval=}")
             self._game = game_name
             if self.on_game:
                 self.on_game(game_name)

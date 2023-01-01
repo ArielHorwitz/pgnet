@@ -262,7 +262,9 @@ class BaseGame:
     """
 
     persistent: bool = False
-    """Set the persistent to allow the game to persist even without players."""
+    """Set as persistent to allow the game to persist even without players."""
+    heartbeat_rate: float = 10
+    """How many times per second the client should check for updates."""
 
     def __init__(self, name: str, save_string: Optional[str] = None):
         """Initialized with the name given by the user that created the game.
