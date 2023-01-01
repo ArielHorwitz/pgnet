@@ -1,6 +1,7 @@
 """Common constants and classes."""
 
 from typing import Optional, Callable
+from loguru import logger
 import asyncio
 import functools
 import arrow
@@ -319,3 +320,11 @@ class BaseGame:
     def update(self):
         """Called on an interval by the server."""
         pass
+
+
+def enable_logging(enable: bool = True, /):
+    """Enable/disable logging from the pgnet library."""
+    if enable:
+        logger.enable("pgnet")
+    else:
+        logger.disable("pgnet")
