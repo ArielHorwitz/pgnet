@@ -1,59 +1,88 @@
 """Developer client - command line tool to interface with a server."""
 
-from typing import Optional, Type
+from typing import Optional
 import sys
 import functools
 import arrow
 import asyncio
 import aioconsole
-from .client import BaseClient
-from .localhost import LocalhostClient
+from .client import Client
 from .util import (
     Packet,
     Response,
-    BaseGame,
+    Game,
     DEFAULT_PORT,
     ADMIN_USERNAME,
     DEFAULT_ADMIN_PASSWORD,
 )
 
 
-class DevGame(BaseGame):
-    """A subclass of BaseGame for simple testing purposes."""
+class DevGame(Game):
+    """A subclass of `Game` for simple testing purposes.
+
+    Maintains a log of strings, that users can get and add to.
+    """
 
     persistent = True
 
     def __init__(self, *args, save_string: Optional[str] = None, **kwargs):
-        """Initialization."""
+        """On initialization, import log from *save_string*."""
         super().__init__(*args, **kwargs)
         self.log = list(save_string.splitlines()) if save_string else ["Game started"]
 
     def user_joined(self, username: str):
-        """Overridden callback."""
-        print(f"Joined: {username=}")
+        """Add log message on user join."""
         self.log.append(f"Joined: {username}")
 
     def user_left(self, username: str):
-        """Overridden callback."""
-        print(f"Left: {username=}")
+        """Add log message on user leave."""
         self.log.append(f"Left: {username}")
 
+    def handle_game_packet(self, packet: Packet) -> Response:
+        """Add log message and return full log."""
+        self.log.append(f"{packet.username} says: {packet.message!r}")
+        return Response("Message added.")
+
+    def handle_heartbeat(self, packet: Packet) -> Response:
+        """Return latest log messages."""
+        return Response("Latest log entries.", dict(log=self.log[-10:]))
+
     def get_save_string(self) -> str:
-        """Overriden base method."""
+        """Export the log."""
         return "\n".join(self.log)
 
 
-class DevClient:
-    """A CLI client."""
+class DevClient(Client):
+    """Client subclass to implement heartbeat for `DevGame`."""
 
-    def __init__(self, client: BaseClient):
-        """A CLI client."""
-        self.client = client
+    on_connection = functools.partial(print, ">> CONNECTION:")
+    on_status = functools.partial(print, ">> STATUS:")
+    on_game = functools.partial(print, ">> GAME:")
+    log = []
 
-    async def run(self) -> int:
-        """Run the client."""
-        conn_task = asyncio.create_task(self.client.async_connect())
-        cli_task = asyncio.create_task(self._async_cli())
+    def on_heartbeat(self, heartbeat: Response):
+        """Save and print the log if changed."""
+        game_log = heartbeat.payload.get("log", ["Empty log"])
+        if self.log != game_log:
+            self.log = game_log
+            print("New log:")
+            print("\n".join(game_log))
+
+
+class DevCLI:
+    """A CLI for the PGNet client."""
+    client = DevClient()
+
+    async def async_run(self, remote: bool):
+        """Run the command-line devclient.
+
+        Args:
+            remote: Connect to a remote server, prompting the user for connection
+                details, otherwise run a localhost server using `DevGame`.
+        """
+        conn_coro = self._connect(remote)
+        conn_task = asyncio.create_task(conn_coro)
+        cli_task = asyncio.create_task(self._cli())
         combined_task = asyncio.wait(
             (conn_task, cli_task),
             return_when=asyncio.FIRST_COMPLETED,
@@ -63,105 +92,90 @@ class DevClient:
             self.client.close()
             await asyncio.wait_for(conn_task, timeout=1)
 
-    def _close(self, *args):
-        self.client.close()
+    async def _connect(self, remote: bool):
+        username = ADMIN_USERNAME
+        password = DEFAULT_ADMIN_PASSWORD
+        username = input("Enter username (leave blank for admin): ") or username
+        password = input("Enter password (leave blank for admin default): ") or password
+        if not remote:
+            await self.client.async_connect_localhost(
+                DevGame,
+                username=username,
+                password=password,
+            )
+            return
+        address = input("Enter address (leave blank for localhost): ") or "localhost"
+        port = int(input("Enter port (leave blank for default): ") or DEFAULT_PORT)
+        pubkey = input("Enter pubkey to verify (leave blank to ignore): ") or None
+        await self.client.async_connect(
+            address=address,
+            port=port,
+            username=username,
+            password=password,
+            verify_server_pubkey=pubkey,
+        )
 
-    async def _async_cli(self):
+    async def _cli(self):
         while not self.client.connected:
             await asyncio.sleep(0.1)
         while True:
             uinput = await aioconsole.ainput(">> ")
             if uinput == "quit":
                 return
-            packet = _parse_cli_packet(uinput)
+            packet = self._parse_cli_packet(uinput)
             if packet:
-                await self._relay_packet(packet)
+                await self._send_packet(packet)
 
-    async def _relay_packet(self, packet):
+    async def _send_packet(self, packet):
         print(packet.debug_repr)
         print(f"    SENT: {arrow.now().for_json()}")
         response = asyncio.Future()
         self.client.send(packet, lambda sr, r=response: r.set_result(sr))
         await response
-        _log_response(response.result())
+        self._log_response(response.result())
 
+    @staticmethod
+    def _parse_cli_packet(s: str, /) -> Optional[Packet]:
+        try:
+            parts = s.split(";")
+            message = parts.pop(0)
+            payload = {}
+            for p in parts:
+                key, value = p.split("=", 1)
+                if value.isnumeric():
+                    i, f = int(value), float(value)
+                    value = i if i == f else f
+                payload[key] = value
+        except ValueError as e:
+            print(
+                "Bad CLI request format, expected: "
+                f"'message_str;key1=value1;key2=value2'\n{e}"
+            )
+            return None
+        return Packet(message, payload)
 
-def _parse_cli_packet(s: str, /) -> Optional[Packet]:
-    try:
-        parts = s.split(";")
-        message = parts.pop(0)
-        payload = {}
-        for p in parts:
-            key, value = p.split("=", 1)
-            if value.isnumeric():
-                i, f = int(value), float(value)
-                value = i if i == f else f
-            payload[key] = value
-    except ValueError as e:
-        print(
-            "Bad CLI request format, expected: "
-            f"'message_str;key1=value1;key2=value2'\n{e}"
-        )
-        return None
-    return Packet(message, payload)
-
-
-def _log_response(response: Response):
-    strs = [
-        f"RECEIVED: {arrow.now().for_json()}",
-        response.debug_repr,
-        "-" * 20,
-        f"MESSAGE:  {response.message}",
-    ]
-    if len(tuple(response.payload.keys())):
-        strs.extend([
-            "PAYLOAD:",
-            *(f"{k:>20} : {v}" for k, v in response.payload.items()),
-        ])
-    print("\n".join(strs))
-    print("=" * 20)
-
-
-async def async_run(
-    *,
-    remote: bool = False,
-    game: Type[BaseGame] = DevGame,
-    server_kwargs: Optional[dict] = None,
-) -> int:
-    """Run the CLI client for admins and developers."""
-    username = ADMIN_USERNAME
-    password = DEFAULT_ADMIN_PASSWORD
-    kw = dict(
-        on_connection=functools.partial(print, ">> CONN:"),
-        on_status=functools.partial(print, ">> STATUS:"),
-        on_game=functools.partial(print, ">> GAME:"),
-    )
-    if remote:
-        address = input("Enter address (leave blank for localhost): ") or "localhost"
-        port = int(input("Enter port (leave blank for default): ") or DEFAULT_PORT)
-        username = input("Enter username (leave blank for admin): ") or username
-        password = input("Enter password (leave blank for default): ") or password
-        pubkey = input("Enter pubkey to verify (leave blank to ignore): ") or None
-        client = BaseClient(
-            address=address,
-            port=port,
-            username=username,
-            password=password,
-            verify_server_pubkey=pubkey,
-            **kw,
-        )
-    else:
-        client = LocalhostClient(
-            username=ADMIN_USERNAME,
-            password=DEFAULT_ADMIN_PASSWORD,
-            game=game,
-            server_kwargs=server_kwargs,
-            **kw,
-        )
-    await DevClient(client).run()
+    @staticmethod
+    def _log_response(response: Response):
+        strs = [
+            f"RECEIVED: {arrow.now().for_json()}",
+            response.debug_repr,
+            "-" * 20,
+            f"MESSAGE:  {response.message}",
+        ]
+        if len(tuple(response.payload.keys())):
+            strs.extend([
+                "PAYLOAD:",
+                *(f"{k:>20} : {v}" for k, v in response.payload.items()),
+            ])
+        print("\n".join(strs))
+        print("=" * 20)
 
 
 def run():
-    """Main script entry point for the devclient."""
+    """Main script entry point for the devclient.
+
+    If any arguments are found in `sys.argv` then it will connect to a remote server,
+    otherwise will run a localhost server with `DevGame`.
+    """
     remote = len(sys.argv) > 1 and sys.argv[1] == "-r"
-    asyncio.run(async_run(remote=remote))
+    asyncio.run(DevCLI().async_run(remote=remote))
