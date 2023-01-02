@@ -1,4 +1,4 @@
-"""Home of the `BaseServer` class."""
+"""Home of the `Server` class."""
 
 from loguru import logger
 from typing import Optional, Callable, Type, Any
@@ -19,7 +19,7 @@ from .util import (
     DisconnectedError,
     Key,
     Connection,
-    BaseGame,
+    Game,
     DEFAULT_PORT,
     REQUEST_GAME_DIR,
     REQUEST_JOIN_GAME,
@@ -88,9 +88,9 @@ class UserConnection(Connection):
 
 @dataclass
 class LobbyGame:
-    """BaseGame instance wrapper for management by server."""
+    """`Game` instance wrapper for management by server."""
 
-    game: BaseGame = field(repr=False)
+    game: Game = field(repr=False)
     name: str
     password: Optional[str]
     connected_users: set[str] = field(default_factory=set)
@@ -140,11 +140,11 @@ class LobbyGame:
         self.game.update()
 
 
-class BaseServer:
+class Server:
     """The server that hosts games.
 
-    Subclass from `BaseGame` and pass it as the *game* argument for the server.
-    Then, use the `BaseServer.async_run` coroutine to start the server.
+    Subclass from `Game` and pass it as the *game* argument for the server. Then,
+    use the `Server.async_run` coroutine to start the server.
 
     By default, the server is configured to listen on localhost. To listen
     globally, set *`listen_globally`* and *`admin_password`*. Make sure that any
@@ -153,7 +153,7 @@ class BaseServer:
 
     def __init__(
         self,
-        game: Type[BaseGame],
+        game: Type[Game],
         /,
         *,
         listen_globally: bool = False,
@@ -190,7 +190,7 @@ class BaseServer:
         self._games: dict[str, LobbyGame] = {}
         self._connections: dict[str, Optional[UserConnection]] = {}
         self._kicked_users: set[str] = set()
-        self._game_cls: Type[BaseGame] = game
+        self._game_cls: Type[Game] = game
         self._save_file: Path = Path(save_file or DEFAULT_SAVE_FILE)
         self._address: str = "" if listen_globally else "localhost"
         self._port: int = port
@@ -705,5 +705,5 @@ class BaseServer:
 
 
 __all__ = (
-    "BaseServer",
+    "Server",
 )

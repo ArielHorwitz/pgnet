@@ -1,4 +1,4 @@
-"""Home of the `BaseClient` class."""
+"""Home of the `Client` class."""
 
 from typing import Optional, Callable, Any, Type
 from loguru import logger
@@ -6,13 +6,13 @@ import asyncio
 from dataclasses import dataclass
 import websockets
 from websockets.client import WebSocketClientProtocol
-from .server import BaseServer
+from .server import Server
 from .util import (
     Packet,
     Response,
     Connection,
     Key,
-    BaseGame,
+    Game,
     DEFAULT_PORT,
     DisconnectedError,
     REQUEST_GAME_DIR,
@@ -50,21 +50,19 @@ class ClientConnection(Connection):
             self._websocket_busy = False
 
 
-class BaseClient:
+class Client:
     """The client that manages communication with the server.
 
-    Use `BaseClient.async_connect` to connect to the server.
+    Use `Client.async_connect` to connect to the server.
 
-    Once connected, use `BaseClient.get_games_dir`, `BaseClient.create_game`,
-    `BaseClient.join_game`, and `BaseClient.leave_game` to join or leave a game.
+    Once connected, use `Client.get_games_dir`, `Client.create_game`,
+    `Client.join_game`, and `Client.leave_game` to join or leave a game.
 
     It is possible to bind callbacks to client events by subclassing and overriding or
-    by setting `BaseClient.on_connection`, `BaseClient.on_status`, and
-    `BaseClient.on_game`.
+    by setting `Client.on_connection`, `Client.on_status`, and `Client.on_game`.
 
-    When in game (`BaseClient.game` is not *None*), use `BaseClient.send` to send a
-    `pgnet.Packet` to `pgnet.BaseGame.handle_game_packet` and receive a
-    `pgnet.Response`.
+    When in game (`Client.game` is not *None*), use `Client.send` to send a
+    `pgnet.Packet` to `pgnet.Game.handle_game_packet` and receive a `pgnet.Response`.
 
     For extra security, use `verify_server_pubkey` when initializing a client
     (not required).
@@ -151,27 +149,27 @@ class BaseClient:
 
     async def async_connect_localhost(
         self,
-        game: Type[BaseGame],
+        game: Type[Game],
         /,
         *,
         username: str = "Player",
         password: str = "",
-        server_factory: Callable[[Any], BaseServer] = BaseServer,
+        server_factory: Callable[[Any], Server] = Server,
     ):
-        """A localhost alternative to `BaseClient.async_connect`.
+        """A localhost alternative to `Client.async_connect`.
 
           Creates a localhost server and connects to it. This allows to play and test
           locally without needing to run a separate process for the server. This server
           will *not* listen globally.
 
         Args:
-            game: The `BaseGame` class that is required by the server.
+            game: The `Game` class that is required by the server.
             username: The user's name.
             password: The user's password.
-            server_factory: Callable that returns a BaseServer instance. This can be
+            server_factory: Callable that returns a Server instance. This can be
                 used to pass custom arguments to the server initialization.
         """
-        server: BaseServer = server_factory(
+        server: Server = server_factory(
             game,
             listen_globally=False,
             require_user_password=False,
@@ -258,9 +256,8 @@ class BaseClient:
     ):
         """Add a packet to the queue.
 
-        If a callback was given, the response will be passed to it. Callbacks
-        are not ensured, as the queue can be arbitrarily cleared using
-        `BaseClient.flush_queue`.
+        If a callback was given, the response will be passed to it. Callbacks are not
+        ensured, as the queue can be arbitrarily cleared using `Client.flush_queue`.
         """
         if not self._connected:
             logger.warning(f"Cannot queue packets while disconnected: {packet}")
@@ -295,25 +292,24 @@ class BaseClient:
     def on_heartbeat(self, heartbeat: Response):
         """Override this method to implement heartbeat updates.
 
-        The *heartbeat* Response is given by
-        `pgnet.util.BaseGame.handle_heartbeat`. The heartbeat rate is set by
-        `pgnet.util.BaseGame.heartbeat_rate`.
+        The *heartbeat* Response is given by `pgnet.util.Game.handle_heartbeat`. The
+        heartbeat rate is set by `pgnet.util.Game.heartbeat_rate`.
         """
         pass
 
     def heartbeat_payload(self) -> dict:
         """Override this method to add data to the heartbeat request payload.
 
-        This payload is passed to `pgnet.util.BaseGame.handle_heartbeat`. The
-        heartbeat rate is set by `pgnet.util.BaseGame.heartbeat_rate`.
+        This payload is passed to `pgnet.util.Game.handle_heartbeat`. The heartbeat rate
+        is set by `pgnet.util.Game.heartbeat_rate`.
         """
         return dict()
 
     async def _async_heartbeat(self):
         """Periodically update while connected and in game.
 
-        Will create a heartbeat request using `BaseClient.heartbeat_payload`
-        and pass the response to `BaseClient.on_heartbeat`.
+        Will create a heartbeat request using `Client.heartbeat_payload` and pass the
+        response to `Client.on_heartbeat`.
         """
         while True:
             await asyncio.sleep(self._heartbeat_interval)
@@ -412,5 +408,5 @@ class BaseClient:
 
 
 __all__ = (
-    "BaseClient",
+    "Client",
 )

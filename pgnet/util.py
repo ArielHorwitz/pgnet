@@ -265,7 +265,7 @@ class Connection:
         await self.websocket.close()
 
 
-class BaseGame:
+class Game:
     """Subclass to implement game logic.
 
     This class should not be initialized directly, it is initialized by the
@@ -277,7 +277,7 @@ class BaseGame:
     heartbeat_rate: float = 10
     """How many times per second the client should check for updates.
 
-    See `BaseGame.handle_heartbeat` and `pgnet.BaseClient.on_heartbeat`.
+    See `Game.handle_heartbeat` and `pgnet.Client.on_heartbeat`.
     """
 
     def __init__(self, name: str, save_string: Optional[str] = None):
@@ -285,8 +285,8 @@ class BaseGame:
 
         Args:
             name: Game instance name.
-            save_string: Game data loaded from disk from last server session as
-                given by `BaseGame.get_save_string`.
+            save_string: Game data loaded from disk from last server session as given by
+                `Game.get_save_string`.
         """
         pass
 
@@ -302,7 +302,7 @@ class BaseGame:
         """Packet handling for heartbeat updates and game requests.
 
         Most cases should not override this method, rather override
-        `BaseGame.handle_game_packet` and `BaseGame.handle_heartbeat`.
+        `Game.handle_game_packet` and `Game.handle_heartbeat`.
         """
         if packet.message == REQUEST_HEARTBEAT_UPDATE:
             return self.handle_heartbeat(packet)
@@ -324,9 +324,9 @@ class BaseGame:
     def get_save_string(self) -> str:
         """Override this method to save game data to disk.
 
-        This method is called by the server when shutting down. In the next
-        session, the server will recreate the game with this string passed as
-        *`save_string`* to `BaseGame.__init__`.
+        This method is called by the server when shutting down. In the next session,
+        the server will recreate the game with this string passed as *`save_string`* to
+        `Game.__init__`.
         """
         return ""
 
@@ -347,7 +347,7 @@ def enable_logging(enable: bool = True, /):
 
 
 __all__ = (
-    "BaseGame",
+    "Game",
     "Packet",
     "Response",
     "enable_logging",
