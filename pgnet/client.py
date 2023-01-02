@@ -1,16 +1,18 @@
 """Home of the `BaseClient` class."""
 
-from typing import Optional, Callable, Any
+from typing import Optional, Callable, Any, Type
 from loguru import logger
 import asyncio
 from dataclasses import dataclass
 import websockets
 from websockets.client import WebSocketClientProtocol
+from .server import BaseServer
 from .util import (
     Packet,
     Response,
     Connection,
     Key,
+    BaseGame,
     DEFAULT_PORT,
     DisconnectedError,
     REQUEST_GAME_DIR,
@@ -56,11 +58,11 @@ class BaseClient:
     Once connected, use `BaseClient.get_games_dir`, `BaseClient.create_game`,
     `BaseClient.join_game`, and `BaseClient.leave_game` to join or leave a game.
 
-    It is possible to bind callbacks to client events by setting
-    `BaseClient.on_connection`, `BaseClient.on_status`, and
+    It is possible to bind callbacks to client events by subclassing and overriding or
+    by setting `BaseClient.on_connection`, `BaseClient.on_status`, and
     `BaseClient.on_game`.
 
-    When in game (`BaseClient.game` is set), use `BaseClient.send` to send a
+    When in game (`BaseClient.game` is not *None*), use `BaseClient.send` to send a
     `pgnet.Packet` to `pgnet.BaseGame.handle_game_packet` and receive a
     `pgnet.Response`.
 
@@ -68,32 +70,7 @@ class BaseClient:
     (not required).
     """
 
-    def __init__(
-        self,
-        *,
-        address: str = "localhost",
-        port: int = DEFAULT_PORT,
-        username: str = "guest",
-        password: str = "",
-        verify_server_pubkey: Optional[str] = None,
-        on_connection: Optional[Callable[[bool], Any]] = None,
-        on_status: Optional[Callable[[str], Any]] = None,
-        on_game: Optional[Callable[[Optional[str]], Any]] = None,
-    ):
-        """See module documentation for details.
-
-        Args:
-            address: Server IP address.
-            port: Server port number.
-            username: The user's username.
-            password: The user's password.
-            verify_server_pubkey: If set, will compare against the public
-                key of the server and disconnect if it's public key does
-                not match.
-            on_connection: Callback for when connecting or disconnecting.
-            on_status: Callback for client status feedback.
-            on_game: Callback for when joining or leaving a game.
-        """
+    def __init__(self):  # noqa: D107
         self._key: Key = Key()
         self._status: str = "New client."
         self._server_connection: Optional[WebSocketClientProtocol] = None
@@ -102,29 +79,35 @@ class BaseClient:
         self._packet_queue: list[tuple[Packet, ResponseCallback]] = []
         self._game: Optional[str] = None
         self._heartbeat_interval = 1 / DEFAULT_HEARTBEAT_RATE
-        self.address: str = address
-        self.port: int = port
-        self.username: str = username
-        self.password: str = password
-        self.verify_server_pubkey: Optional[str] = verify_server_pubkey
-        self.on_connection: Optional[Callable[[bool], Any]] = on_connection
-        """Callback for connection change event."""
-        self.on_status: Optional[Callable[[str], Any]] = on_status
-        """Callback for client status event."""
-        self.on_game: Optional[Callable[[str], Any]] = on_game
-        """Callback for game change event."""
 
-    async def async_connect(self):
+    async def async_connect(
+        self,
+        *,
+        address: str,
+        username: str,
+        password: str = "",
+        port: int = DEFAULT_PORT,
+        verify_server_pubkey: Optional[str] = None,
+    ):
         """Connect to a server.
 
         This procedure will automatically create an end-to-end encrypted
         connection (optionally verifying the public key first), and authenticate
         the username and password. Only after succesfully completing these steps
         will the client be considered connected.
+
+        Args:
+            address: Server IP address.
+            username: The user's username.
+            password: The user's password.
+            port: Server port number.
+            verify_server_pubkey: If set, will compare against the public
+                key of the server and disconnect if it's public key does
+                not match.
         """
         if self._server_connection is not None:
             raise RuntimeError("Cannot open more than one connection per client.")
-        full_address = f"{self.address}:{self.port}"
+        full_address = f"{address}:{port}"
         self._server_connection = websockets.connect(
             f"ws://{full_address}",
             close_timeout=1,
@@ -140,10 +123,15 @@ class BaseClient:
                 raise DisconnectedError("Failed to call server.")
             connection = ClientConnection(websocket)
             self._set_status("Logging in...", logger.info)
-            await self._handle_handshake(connection)
+            await self._handle_handshake(
+                connection,
+                username,
+                password,
+                verify_server_pubkey,
+            )
             self._set_connection(True)
             self._set_status(
-                f"Logged in as {self.username} @ {connection.remote}",
+                f"Logged in as {username} @ {connection.remote}",
                 logger.info,
             )
             heartbeat = asyncio.create_task(self._async_heartbeat())
@@ -160,6 +148,47 @@ class BaseClient:
             logger.info(f"Connection terminated {self}")
             return
         logger.warning(f"Connection terminated without DisconnectedError {connection}")
+
+    async def async_connect_localhost(
+        self,
+        game: Type[BaseGame],
+        /,
+        *,
+        username: str = "Player",
+        password: str = "",
+        server_factory: Callable[[Any], BaseServer] = BaseServer,
+    ):
+        """A localhost alternative to `BaseClient.async_connect`.
+
+          Creates a localhost server and connects to it. This allows to play and test
+          locally without needing to run a separate process for the server. This server
+          will *not* listen globally.
+
+        Args:
+            game: The `BaseGame` class that is required by the server.
+            username: The user's name.
+            password: The user's password.
+            server_factory: Callable that returns a BaseServer instance. This can be
+                used to pass custom arguments to the server initialization.
+        """
+        server: BaseServer = server_factory(
+            game,
+            listen_globally=False,
+            require_user_password=False,
+        )
+        started = asyncio.Future()
+        server_coro = server.async_run(on_start=lambda *a: started.set_result(1))
+        server_task = asyncio.create_task(server_coro)
+        server_task.add_done_callback(lambda *a: self.close())
+        await asyncio.wait((server_task, started), return_when=asyncio.FIRST_COMPLETED)
+        await self.async_connect(
+            address="localhost",
+            username=username,
+            password=password,
+            verify_server_pubkey=server.pubkey,
+        )
+        self.close()
+        server.shutdown()
 
     @property
     def connected(self) -> bool:
@@ -251,6 +280,18 @@ class BaseClient:
             logger.debug(f"Discarding messages:  {self._packet_queue}")
         self._packet_queue = []
 
+    def on_connection(self, connected: bool):
+        """Called when connected or disconnected."""
+        pass
+
+    def on_status(self, status: str):
+        """Called with feedback on client status."""
+        pass
+
+    def on_game(self, game_name: str):
+        """Called when joining or leaving a game."""
+        pass
+
     def on_heartbeat(self, heartbeat: Response):
         """Override this method to implement heartbeat updates.
 
@@ -280,7 +321,13 @@ class BaseClient:
                 packet = Packet(REQUEST_HEARTBEAT_UPDATE, self.heartbeat_payload())
                 self.send(packet, self.on_heartbeat)
 
-    async def _handle_handshake(self, connection: ClientConnection):
+    async def _handle_handshake(
+        self,
+        connection: ClientConnection,
+        username: str,
+        password: str,
+        verify_server_pubkey: Optional[str],
+    ):
         """Handle a new connection's handshake sequence. Modifies the connection object.
 
         First trade public keys and assign the connection's `tunnel`. Then log in
@@ -292,15 +339,14 @@ class BaseClient:
         pubkey = response.payload.get("pubkey")
         if not pubkey or not isinstance(pubkey, str):
             raise DisconnectedError("Missing public key string from server.")
-        if self.verify_server_pubkey is not None:
-            if pubkey != self.verify_server_pubkey:
+        if verify_server_pubkey is not None:
+            if pubkey != verify_server_pubkey:
                 raise DisconnectedError("Unverified server public key.")
             logger.debug(f"Server pubkey verified: {pubkey=}")
         connection.tunnel = self._key.get_tunnel(pubkey)
         logger.debug(f"Assigned tunnel: {connection}")
         # Authenticate
-        payload = dict(username=self.username, password=self.password)
-        packet = Packet("handshake", payload)
+        packet = Packet("handshake", dict(username=username, password=password))
         response = await connection.send_recv(packet)
         if response.status != STATUS_OK:
             m = response.message
@@ -364,10 +410,7 @@ class BaseClient:
             if self.on_game:
                 self.on_game(game_name)
 
-    def __repr__(self) -> str:
-        """Object repr."""
-        return (
-            f"<{self.__class__.__qualname__} "
-            f"address={self.address!r} port={self.port!r} "
-            f"{id(self)}>"
-        )
+
+__all__ = (
+    "BaseClient",
+)
