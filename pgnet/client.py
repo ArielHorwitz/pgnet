@@ -15,12 +15,8 @@ from .util import (
     Game,
     DEFAULT_PORT,
     DisconnectedError,
-    REQUEST_GAME_DIR,
-    REQUEST_CREATE_GAME,
-    REQUEST_JOIN_GAME,
-    REQUEST_LEAVE_GAME,
-    REQUEST_HEARTBEAT_UPDATE,
-    STATUS_OK,
+    STATUS,
+    REQUEST,
 )
 
 
@@ -196,7 +192,7 @@ class Client:
 
     def get_games_dir(self, callback: Callable, /):
         """Get the games directory from the server and pass the response to callback."""
-        self.send(Packet(REQUEST_GAME_DIR), callback, do_next=True)
+        self.send(Packet(REQUEST.GAME_DIR), callback, do_next=True)
 
     def create_game(
         self,
@@ -210,7 +206,7 @@ class Client:
         payload = dict(name=name)
         if password:
             payload["password"] = password
-        self.send(Packet(REQUEST_CREATE_GAME, payload), callback, do_next=True)
+        self.send(Packet(REQUEST.CREATE_GAME, payload), callback, do_next=True)
 
     def join_game(
         self,
@@ -224,7 +220,7 @@ class Client:
         payload = dict(name=name)
         if password:
             payload["password"] = password
-        self.send(Packet(REQUEST_JOIN_GAME, payload), callback, do_next=True)
+        self.send(Packet(REQUEST.JOIN_GAME, payload), callback, do_next=True)
 
     def leave_game(
         self,
@@ -232,7 +228,7 @@ class Client:
         callback: Optional[ResponseCallback] = None,
     ):
         """Request from the server to leave the game."""
-        self.send(Packet(REQUEST_LEAVE_GAME), callback, do_next=True)
+        self.send(Packet(REQUEST.LEAVE_GAME), callback, do_next=True)
 
     def send(
         self,
@@ -387,7 +383,7 @@ class Client:
         handshake_payload = dict(username=self._username, password=self._password)
         packet = Packet("handshake", handshake_payload)
         response = await connection.send_recv(packet)
-        if response.status != STATUS_OK:
+        if response.status != STATUS.OK:
             m = response.message
             logger.info(m)
             raise DisconnectedError(m)
@@ -401,7 +397,7 @@ class Client:
         while True:
             await asyncio.sleep(self._heartbeat_interval)
             if self.connected and self.game:
-                packet = Packet(REQUEST_HEARTBEAT_UPDATE, self.heartbeat_payload())
+                packet = Packet(REQUEST.HEARTBEAT_UPDATE, self.heartbeat_payload())
                 self.send(packet, self.on_heartbeat)
 
     async def _handle_user_connection(self, connection: ClientConnection):
@@ -415,7 +411,7 @@ class Client:
             # Send and callback with response
             packet, callback = self._packet_queue.pop(0)
             response = await connection.send_recv(packet)
-            if response.status != STATUS_OK:
+            if response.status != STATUS.OK:
                 logger.info(f"Status code: {response.debug_repr}")
             self._handle_game_change(response)
             if callback:

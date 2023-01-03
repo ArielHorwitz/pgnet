@@ -127,9 +127,7 @@ from .util import (
     Response,
     Game,
     enable_logging,
-    STATUS_OK,
-    STATUS_BAD,
-    STATUS_UNEXPECTED,
+    STATUS,
     DEFAULT_PORT,
 )
 from . import util, client, server, examples, devclient
@@ -144,9 +142,7 @@ __all__ = (
     "Server",
     "Packet",
     "Response",
-    "STATUS_OK",
-    "STATUS_BAD",
-    "STATUS_UNEXPECTED",
+    "STATUS",
     "enable_logging",
     "DEFAULT_PORT",
     "util",

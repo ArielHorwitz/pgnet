@@ -16,14 +16,41 @@ from nacl.encoding import Base64Encoder
 DEFAULT_PORT = 38929
 ADMIN_USERNAME = "admin"
 DEFAULT_ADMIN_PASSWORD = "localhostadmin"
-REQUEST_GAME_DIR = "__pgnet__.game_dir"
-REQUEST_JOIN_GAME = "__pgnet__.join_game"
-REQUEST_LEAVE_GAME = "__pgnet__.leave_game"
-REQUEST_CREATE_GAME = "__pgnet__.create_game"
-REQUEST_HEARTBEAT_UPDATE = "__pgnet__.heartbeat_update"
-STATUS_OK = 0
-STATUS_BAD = 1
-STATUS_UNEXPECTED = 2
+
+
+class REQUEST:
+    """Strings used as a message in `Packet` for common requests.
+
+    It is recommended to use the `pgnet.Client` API instead of these. `Game` classes
+    should avoid using the string values here as messages in a `Packet` - such packets
+    will be specially handled by the server.
+    """
+
+    GAME_DIR: str = "__pgnet__.game_dir"
+    """Request the games directory."""
+    JOIN_GAME: str = "__pgnet__.join_game"
+    """Request to join a game."""
+    LEAVE_GAME: str = "__pgnet__.leave_game"
+    """Request to leave a game."""
+    CREATE_GAME: str = "__pgnet__.create_game"
+    """Request to create and join a game."""
+    HEARTBEAT_UPDATE: str = "__pgnet__.heartbeat_update"
+    """Request a heartbeat update from the game."""
+
+
+class STATUS:
+    """Integer status codes for a `Response` to client requests.
+
+    These are used internally by `pgnet.Server`. It is possible but not required to use
+    these in games and clients.
+    """
+
+    OK: int = 0
+    """Indicates success without issues."""
+    BAD: int = 1
+    """Indicates fatal error."""
+    UNEXPECTED: int = 2
+    """Indicates an issue."""
 
 
 class DisconnectedError(Exception):
@@ -99,7 +126,7 @@ class Response:
     """Message text."""
     payload: dict = field(default_factory=dict, repr=False)
     """Dictionary of arbitrary data. Must be JSON-able."""
-    status: int = STATUS_OK
+    status: int = STATUS.OK
     """Status code for handling the request that this is responding to."""
     created_on: Optional[str] = None
     """The creation time of the packet."""
@@ -308,7 +335,7 @@ class Game:
         Most use cases should override `Game.handle_game_packet` and
         `Game.handle_heartbeat` instead of this method.
         """
-        if packet.message == REQUEST_HEARTBEAT_UPDATE:
+        if packet.message == REQUEST.HEARTBEAT_UPDATE:
             return self.handle_heartbeat(packet)
         return self.handle_game_packet(packet)
 
@@ -316,7 +343,7 @@ class Game:
         """Override this method to implement packet handling."""
         return Response(
             f"No packet handling configured for {self.__class__.__qualname__}",
-            status=STATUS_UNEXPECTED,
+            status=STATUS.UNEXPECTED,
         )
 
     def handle_heartbeat(self, packet: Packet) -> Response:
@@ -353,8 +380,10 @@ def enable_logging(enable: bool = True, /):
 
 
 __all__ = (
+    "enable_logging",
     "Game",
     "Packet",
     "Response",
-    "enable_logging",
+    "STATUS",
+    "REQUEST",
 )

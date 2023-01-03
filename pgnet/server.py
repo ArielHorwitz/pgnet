@@ -21,14 +21,10 @@ from .util import (
     Connection,
     Game,
     DEFAULT_PORT,
-    REQUEST_GAME_DIR,
-    REQUEST_JOIN_GAME,
-    REQUEST_LEAVE_GAME,
-    REQUEST_CREATE_GAME,
+    REQUEST,
     DEFAULT_ADMIN_PASSWORD,
     ADMIN_USERNAME,
-    STATUS_BAD,
-    STATUS_UNEXPECTED,
+    STATUS,
 )
 
 
@@ -301,7 +297,7 @@ class Server:
         if not pubkey or not isinstance(pubkey, str):
             response = Response(
                 "Missing public key string.",
-                status=STATUS_BAD,
+                status=STATUS.BAD,
                 disconnecting=True,
             )
             await connection.send(response)
@@ -317,7 +313,7 @@ class Server:
         fail = self._check_auth(username, password)
         if fail:
             # Respond with problem and disconnect
-            response = Response(fail, status=STATUS_BAD, disconnecting=True)
+            response = Response(fail, status=STATUS.BAD, disconnecting=True)
             await connection.send(response)
             raise DisconnectedError("Failed to authenticate.")
         connection.username = username
@@ -417,13 +413,13 @@ class Server:
 
     def _handle_packet(self, packet: Packet) -> Response:
         """Handle a packet from a logged in user."""
-        if packet.message == REQUEST_GAME_DIR:
+        if packet.message == REQUEST.GAME_DIR:
             return self._game_dir_response()
-        if packet.message == REQUEST_JOIN_GAME:
+        if packet.message == REQUEST.JOIN_GAME:
             return self._handle_join_game(packet)
-        if packet.message == REQUEST_LEAVE_GAME:
+        if packet.message == REQUEST.LEAVE_GAME:
             return self._handle_leave_game(packet)
-        if packet.message == REQUEST_CREATE_GAME:
+        if packet.message == REQUEST.CREATE_GAME:
             return self._handle_create_game(packet)
         if packet.username == ADMIN_USERNAME:
             response = self._handle_admin_packet(packet)
@@ -482,19 +478,19 @@ class Server:
         connection = self._connections[packet.username]
         current_name: Optional[str] = connection.game
         if current_name:
-            return Response("Must leave game first.", status=STATUS_UNEXPECTED)
+            return Response("Must leave game first.", status=STATUS.UNEXPECTED)
         new_name: Optional[str] = packet.payload.get("name")
         if not new_name:
-            return Response("Please specify a game.", status=STATUS_UNEXPECTED)
+            return Response("Please specify a game.", status=STATUS.UNEXPECTED)
         if new_name == current_name:
-            return Response("Already in game.", status=STATUS_UNEXPECTED)
+            return Response("Already in game.", status=STATUS.UNEXPECTED)
         game = self._games.get(new_name)
         if not game:
             return self._handle_create_game(packet)
         password = packet.payload.get("password")
         fail = game.add_user(packet.username, password)
         if fail:
-            return Response(f"Failed to join: {fail}", status=STATUS_UNEXPECTED)
+            return Response(f"Failed to join: {fail}", status=STATUS.UNEXPECTED)
         connection.game = new_name
         return Response("Joined game.", dict(heartbeat_rate=game.heartbeat_rate))
 
@@ -502,7 +498,7 @@ class Server:
         """Handle a request to leave the game."""
         name: Optional[str] = self._connections[packet.username].game
         if not name:
-            return Response("Not in game.", status=STATUS_UNEXPECTED)
+            return Response("Not in game.", status=STATUS.UNEXPECTED)
         self._remove_user_from_game(packet.username)
         return Response("Left game.")
 
@@ -511,12 +507,12 @@ class Server:
         connection = self._connections[packet.username]
         current_game = connection.game
         if current_game:
-            return Response("Must leave game first.", status=STATUS_UNEXPECTED)
+            return Response("Must leave game first.", status=STATUS.UNEXPECTED)
         game_name = packet.payload.get("name")
         if not self._name_allowed(game_name):
-            return Response("Name not allowed.", status=STATUS_UNEXPECTED)
+            return Response("Name not allowed.", status=STATUS.UNEXPECTED)
         if game_name in self._games:
-            return Response("Name already exists.", status=STATUS_UNEXPECTED)
+            return Response("Name already exists.", status=STATUS.UNEXPECTED)
         password = packet.payload.get("password")
         game = self._create_game(game_name, password)
         fail = game.add_user(packet.username, password)
@@ -590,7 +586,7 @@ class Server:
         """Destroy the game specified in payload."""
         game_name = packet.payload.get("name", "")
         if game_name not in self._games:
-            return Response(f"No such game: {game_name}", status=STATUS_UNEXPECTED)
+            return Response(f"No such game: {game_name}", status=STATUS.UNEXPECTED)
         self._destroy_game(game_name)
         return Response(f"Destroyed game: {game_name}")
 
@@ -696,12 +692,12 @@ class Server:
     _canned_lobby_response = Response(
         "Please create/join a game.",
         dict(commands=[
-            REQUEST_GAME_DIR,
-            REQUEST_CREATE_GAME,
-            REQUEST_JOIN_GAME,
-            REQUEST_LEAVE_GAME,
+            REQUEST.GAME_DIR,
+            REQUEST.CREATE_GAME,
+            REQUEST.JOIN_GAME,
+            REQUEST.LEAVE_GAME,
         ]),
-        status=STATUS_UNEXPECTED,
+        status=STATUS.UNEXPECTED,
     )
 
     def __repr__(self) -> str:
