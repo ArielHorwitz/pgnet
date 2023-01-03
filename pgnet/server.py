@@ -217,7 +217,7 @@ class Server:
                 request to reboot the server.
         """
         if self._stop:
-            raise RuntimeError("Can only run the server once per instance.")
+            raise RuntimeError("Cannot run the server more than once concurrently.")
         self._stop = asyncio.Future()
         serving_args = (self._connection_handler, self._address, self._port)
         try:
@@ -232,6 +232,7 @@ class Server:
         self._save_to_disk()
         result = self._stop.result()
         logger.info(f"Server stop {result=} {self}")
+        self._stop = None
         return result
 
     def shutdown(self, result: int = 0, /):
