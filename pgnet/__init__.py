@@ -66,6 +66,9 @@ async def main():
     # Send another packet
     client.send(pgnet.Packet("Goodbye."), response_callback)
     await asyncio.sleep(1)  # wait instead of using client events
+    # Disconnect
+    client.disconnect()
+    await asyncio.sleep(1)  # wait instead of using client events
 
 def response_callback(response: pgnet.Response):
     # Callback for responses. Simply print them.

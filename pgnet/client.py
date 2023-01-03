@@ -96,7 +96,7 @@ class Client:
         self._status: str = "New client."
         self._server_connection: Optional[WebSocketClientProtocol] = None
         self._connected: bool = False
-        self._do_close: bool = False
+        self._do_disconnect: bool = False
         self._packet_queue: list[tuple[Packet, ResponseCallback]] = []
         self._game: Optional[str] = None
         self._heartbeat_interval = 1 / DEFAULT_HEARTBEAT_RATE
@@ -190,9 +190,9 @@ class Client:
             logger.debug("Connecting locally...")
             return await self._async_connect_local()
 
-    def close(self):
+    def disconnect(self):
         """Close the connection."""
-        self._do_close = True
+        self._do_disconnect = True
 
     def get_games_dir(self, callback: Callable, /):
         """Get the games directory from the server and pass the response to callback."""
@@ -359,10 +359,10 @@ class Client:
         started = asyncio.Future()
         server_coro = self._server.async_run(on_start=lambda *a: started.set_result(1))
         server_task = asyncio.create_task(server_coro)
-        server_task.add_done_callback(lambda *a: self.close())
+        server_task.add_done_callback(lambda *a: self.disconnect())
         await asyncio.wait((server_task, started), return_when=asyncio.FIRST_COMPLETED)
         await self._async_connect_remote()
-        self.close()
+        self.disconnect()
         self._server.shutdown()
 
     async def _handle_handshake(self, connection: ClientConnection):
@@ -406,8 +406,8 @@ class Client:
 
     async def _handle_user_connection(self, connection: ClientConnection):
         """Handle the connection after handshake - process the packet queue."""
-        self._do_close = False
-        while not self._do_close:
+        self._do_disconnect = False
+        while not self._do_disconnect:
             # Wait for queued packets
             if not self._packet_queue:
                 await asyncio.sleep(0.01)

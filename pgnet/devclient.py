@@ -36,7 +36,7 @@ class DevCLI:
         )
         await combined_task
         if not conn_task.done():
-            self.client.close()
+            self.client.disconnect()
             await asyncio.wait_for(conn_task, timeout=1)
 
     def _get_client(self, remote: bool):
