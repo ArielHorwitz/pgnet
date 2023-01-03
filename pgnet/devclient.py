@@ -6,6 +6,7 @@ import functools
 import arrow
 import asyncio
 import aioconsole
+from .server import Server
 from .client import Client
 from .util import (
     Packet,
@@ -70,17 +71,17 @@ class DevClient(Client):
 
 
 class DevCLI:
-    """A CLI for the PGNet client."""
-    client = DevClient()
+    """A CLI for the pgnet client."""
 
     async def async_run(self, remote: bool):
         """Run the command-line devclient.
 
         Args:
-            remote: Connect to a remote server, prompting the user for connection
-                details, otherwise run a localhost server using `DevGame`.
+            remote: Connect to a remote server, otherwise run a local server using
+                `DevGame`.
         """
-        conn_coro = self._connect(remote)
+        self.client = self._get_client(remote)
+        conn_coro = self.client.async_connect()
         conn_task = asyncio.create_task(conn_coro)
         cli_task = asyncio.create_task(self._cli())
         combined_task = asyncio.wait(
@@ -92,26 +93,25 @@ class DevCLI:
             self.client.close()
             await asyncio.wait_for(conn_task, timeout=1)
 
-    async def _connect(self, remote: bool):
+    def _get_client(self, remote: bool):
         username = ADMIN_USERNAME
         password = DEFAULT_ADMIN_PASSWORD
         username = input("Enter username (leave blank for admin): ") or username
         password = input("Enter password (leave blank for admin default): ") or password
         if not remote:
-            await self.client.async_connect_localhost(
-                DevGame,
+            return DevClient.local(
+                game=DevGame,
                 username=username,
                 password=password,
             )
-            return
         address = input("Enter address (leave blank for localhost): ") or "localhost"
         port = int(input("Enter port (leave blank for default): ") or DEFAULT_PORT)
-        pubkey = input("Enter pubkey to verify (leave blank to ignore): ") or None
-        await self.client.async_connect(
-            address=address,
-            port=port,
+        pubkey = input("Enter pubkey to verify (leave blank to ignore): ") or ""
+        return DevClient.remote(
             username=username,
             password=password,
+            address=address,
+            port=port,
             verify_server_pubkey=pubkey,
         )
 
@@ -177,5 +177,12 @@ def run():
     If any arguments are found in `sys.argv` then it will connect to a remote server,
     otherwise will run a localhost server with `DevGame`.
     """
-    remote = len(sys.argv) > 1 and sys.argv[1] == "-r"
-    asyncio.run(DevCLI().async_run(remote=remote))
+    arg = None
+    if len(sys.argv) > 1:
+        arg = sys.argv[1]
+    if arg in {"-s", "--server"}:
+        asyncio.run(Server(DevGame).async_run())
+    elif arg in {"-r", "--remote"}:
+        asyncio.run(DevCLI().async_run(remote=True))
+    else:
+        asyncio.run(DevCLI().async_run(remote=False))

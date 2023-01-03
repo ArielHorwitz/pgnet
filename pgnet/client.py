@@ -53,10 +53,18 @@ class ClientConnection(Connection):
 class Client:
     """The client that manages communication with the server.
 
-    Use `Client.async_connect` to connect to the server.
+    This class should not be initialized directly, instead use `Client.remote` or
+    `Client.local`.
+    ```python3
+    # This client will connect to a remote server
+    remote_client = Client.remote(address="1.2.3.4", username="player")
+    # This client will create a local server and connect to it
+    local_client = Client.local(game=MyGame, username="player")
+    ```
 
-    Once connected, use `Client.get_games_dir`, `Client.create_game`,
-    `Client.join_game`, and `Client.leave_game` to join or leave a game.
+    Use `Client.async_connect` to connect to the server. Once connected, use
+    `Client.get_games_dir`, `Client.create_game`, `Client.join_game`, and
+    `Client.leave_game` to join or leave a game.
 
     It is possible to bind callbacks to client events by subclassing and overriding or
     by setting `Client.on_connection`, `Client.on_status`, and `Client.on_game`.
@@ -64,11 +72,23 @@ class Client:
     When in game (`Client.game` is not *None*), use `Client.send` to send a
     `pgnet.Packet` to `pgnet.Game.handle_game_packet` and receive a `pgnet.Response`.
 
-    For extra security, use `verify_server_pubkey` when initializing a client
-    (not required).
+    For extra security, use `verify_server_pubkey` when using a remote client.
     """
 
-    def __init__(self):  # noqa: D107
+    def __init__(
+        self,
+        *,
+        address: str,
+        username: str,
+        password: str,
+        port: int,
+        server: Optional[Server],
+        verify_server_pubkey: str,
+    ):
+        """This class should not be initialized directly.
+
+        .. note:: Use `Client.remote` or `Client.local` to create a client.
+        """
         self._key: Key = Key()
         self._status: str = "New client."
         self._server_connection: Optional[WebSocketClientProtocol] = None
@@ -77,116 +97,95 @@ class Client:
         self._packet_queue: list[tuple[Packet, ResponseCallback]] = []
         self._game: Optional[str] = None
         self._heartbeat_interval = 1 / DEFAULT_HEARTBEAT_RATE
+        # Connection details
+        self._username = username
+        self._password = password
+        self._address = address
+        self._port = port
+        self._server = server
+        self._verify_server_pubkey = verify_server_pubkey
 
-    async def async_connect(
-        self,
+    @classmethod
+    def remote(
+        cls,
         *,
         address: str,
         username: str,
         password: str = "",
         port: int = DEFAULT_PORT,
-        verify_server_pubkey: Optional[str] = None,
-    ):
-        """Connect to a server.
-
-        This procedure will automatically create an end-to-end encrypted
-        connection (optionally verifying the public key first), and authenticate
-        the username and password. Only after succesfully completing these steps
-        will the client be considered connected.
+        verify_server_pubkey: str = "",
+    ) -> "Client":
+        """Create a client that connects to a remote server. See also `Client.local`.
 
         Args:
             address: Server IP address.
             username: The user's username.
             password: The user's password.
             port: Server port number.
-            verify_server_pubkey: If set, will compare against the public
-                key of the server and disconnect if it's public key does
-                not match.
+            verify_server_pubkey: If provided, will compare against the public key of
+                the server and disconnect if they do not match.
         """
-        if self._server_connection is not None:
-            raise RuntimeError("Cannot open more than one connection per client.")
-        full_address = f"{address}:{port}"
-        self._server_connection = websockets.connect(
-            f"ws://{full_address}",
-            close_timeout=1,
+        return cls(
+            address=address,
+            username=username,
+            password=password,
+            port=port,
+            server=None,
+            verify_server_pubkey=verify_server_pubkey,
         )
-        self._set_status(f"Connecting to {full_address}...", logger.info)
-        connection: Optional[ClientConnection] = None
-        heartbeat: Optional[asyncio.Task] = None
-        try:
-            try:
-                websocket = await self._server_connection
-            except OSError as e:
-                logger.debug(f"{e=}")
-                raise DisconnectedError("Failed to call server.")
-            connection = ClientConnection(websocket)
-            self._set_status("Logging in...", logger.info)
-            await self._handle_handshake(
-                connection,
-                username,
-                password,
-                verify_server_pubkey,
-            )
-            self._set_connection(True)
-            self._set_status(
-                f"Logged in as {username} @ {connection.remote}",
-                logger.info,
-            )
-            heartbeat = asyncio.create_task(self._async_heartbeat())
-            await self._handle_user_connection(connection)
-        except DisconnectedError as e:
-            logger.debug(f"{e=}")
-            if connection:
-                await connection.close()
-            if heartbeat:
-                heartbeat.cancel()
-            self._set_connection(False)
-            self._server_connection = None
-            self._set_status(f"Disconnected: {e.args[0]}")
-            logger.info(f"Connection terminated {self}")
-            return
-        logger.warning(f"Connection terminated without DisconnectedError {connection}")
 
-    async def async_connect_localhost(
-        self,
-        game: Type[Game],
-        /,
+    @classmethod
+    def local(
+        cls,
         *,
-        username: str = "Player",
+        game: Type[Game],
+        username: str,
         password: str = "",
+        port: int = DEFAULT_PORT,
         server_factory: Callable[[Any], Server] = Server,
-    ):
-        """A localhost alternative to `Client.async_connect`.
+    ) -> "Client":
+        """Create a client that uses its own local server. See also `Client.remote`.
 
-          Creates a localhost server and connects to it. This allows to play and test
-          locally without needing to run a separate process for the server. This server
-          will *not* listen globally.
+        Only the *game* and *username* arguments are required.
 
         Args:
-            game: The `Game` class that is required by the server.
-            username: The user's name.
+            game: `Game` class to pass to the local server.
+            username: The user's username.
             password: The user's password.
-            server_factory: Callable that returns a Server instance. This can be
-                used to pass custom arguments to the server initialization.
+            port: Server port number.
+            server_factory: If provided, will be used to create the local server. Must
+                accept the same arguments as `pgnet.Server`. This is useful for using a
+                server subclass or to pass custom arguments to the local server.
         """
-        server: Server = server_factory(
+        server = server_factory(
             game,
             listen_globally=False,
+            registration_enabled=True,
             require_user_password=False,
         )
-        started = asyncio.Future()
-        server_coro = server.async_run(on_start=lambda *a: started.set_result(1))
-        server_task = asyncio.create_task(server_coro)
-        server_task.add_done_callback(lambda *a: self.close())
-        await asyncio.wait((server_task, started), return_when=asyncio.FIRST_COMPLETED)
-        await self.async_connect(
+        return cls(
             address="localhost",
             username=username,
             password=password,
+            port=port,
+            server=server,
             verify_server_pubkey=server.pubkey,
         )
-        self.close()
-        server.shutdown()
+
+    async def async_connect(self):
+        """Connect to a server.
+
+        This procedure will automatically create an end-to-end encrypted connection
+        (optionally verifying the public key first), and authenticate the username and
+        password. Only after succesfully completing these steps will the client be
+        considered connected and ready to process the packet queue from `Client.send`.
+        """
+        if self._server is None:
+            logger.debug("Connecting remotely...")
+            return await self._async_connect_remote()
+        else:
+            logger.debug("Connecting locally...")
+            return await self._async_connect_local()
 
     @property
     def connected(self) -> bool:
@@ -305,25 +304,65 @@ class Client:
         """
         return dict()
 
-    async def _async_heartbeat(self):
-        """Periodically update while connected and in game.
+    async def _async_connect_remote(self):
+        """Connect to the server.
 
-        Will create a heartbeat request using `Client.heartbeat_payload` and pass the
-        response to `Client.on_heartbeat`.
+        Gets a websocket to create a `ClientConnection` object. This is passed to the
+        handshake handler to be populated, and then to the user connection for handling
+        the packet queue. The heartbeat task is managed here.
         """
-        while True:
-            await asyncio.sleep(self._heartbeat_interval)
-            if self.connected and self.game:
-                packet = Packet(REQUEST_HEARTBEAT_UPDATE, self.heartbeat_payload())
-                self.send(packet, self.on_heartbeat)
+        if self._server_connection is not None:
+            raise RuntimeError("Cannot open more than one connection per client.")
+        full_address = f"{self._address}:{self._port}"
+        self._server_connection = websockets.connect(
+            f"ws://{full_address}",
+            close_timeout=1,
+        )
+        self._set_status(f"Connecting to {full_address}...", logger.info)
+        connection: Optional[ClientConnection] = None
+        heartbeat: Optional[asyncio.Task] = None
+        try:
+            try:
+                websocket = await self._server_connection
+            except OSError as e:
+                logger.debug(f"{e=}")
+                raise DisconnectedError("Failed to call server.")
+            connection = ClientConnection(websocket)
+            self._set_status("Logging in...", logger.info)
+            await self._handle_handshake(connection)
+            self._set_connection(True)
+            self._set_status(
+                f"Logged in as {self._username} @ {connection.remote}",
+                logger.info,
+            )
+            heartbeat = asyncio.create_task(self._async_heartbeat())
+            await self._handle_user_connection(connection)
+        except DisconnectedError as e:
+            logger.debug(f"{e=}")
+            if connection:
+                await connection.close()
+            if heartbeat:
+                heartbeat.cancel()
+            self._set_connection(False)
+            self._server_connection = None
+            self._set_status(f"Disconnected: {e.args[0]}")
+            logger.info(f"Connection terminated {self}")
+            return
+        logger.warning(f"Connection terminated without DisconnectedError {connection}")
 
-    async def _handle_handshake(
-        self,
-        connection: ClientConnection,
-        username: str,
-        password: str,
-        verify_server_pubkey: Optional[str],
-    ):
+    async def _async_connect_local(self):
+        """Wraps `Client._async_connect_remote to cleanup/teardown the local server."""
+        assert isinstance(self._server, Server)
+        started = asyncio.Future()
+        server_coro = self._server.async_run(on_start=lambda *a: started.set_result(1))
+        server_task = asyncio.create_task(server_coro)
+        server_task.add_done_callback(lambda *a: self.close())
+        await asyncio.wait((server_task, started), return_when=asyncio.FIRST_COMPLETED)
+        await self._async_connect_remote()
+        self.close()
+        self._server.shutdown()
+
+    async def _handle_handshake(self, connection: ClientConnection):
         """Handle a new connection's handshake sequence. Modifies the connection object.
 
         First trade public keys and assign the connection's `tunnel`. Then log in
@@ -335,19 +374,32 @@ class Client:
         pubkey = response.payload.get("pubkey")
         if not pubkey or not isinstance(pubkey, str):
             raise DisconnectedError("Missing public key string from server.")
-        if verify_server_pubkey is not None:
-            if pubkey != verify_server_pubkey:
+        if self._verify_server_pubkey:
+            if pubkey != self._verify_server_pubkey:
                 raise DisconnectedError("Unverified server public key.")
             logger.debug(f"Server pubkey verified: {pubkey=}")
         connection.tunnel = self._key.get_tunnel(pubkey)
         logger.debug(f"Assigned tunnel: {connection}")
         # Authenticate
-        packet = Packet("handshake", dict(username=username, password=password))
+        handshake_payload = dict(username=self._username, password=self._password)
+        packet = Packet("handshake", handshake_payload)
         response = await connection.send_recv(packet)
         if response.status != STATUS_OK:
             m = response.message
             logger.info(m)
             raise DisconnectedError(m)
+
+    async def _async_heartbeat(self):
+        """Periodically update while connected and in game.
+
+        Will create a heartbeat request using `Client.heartbeat_payload` and pass the
+        response to `Client.on_heartbeat`.
+        """
+        while True:
+            await asyncio.sleep(self._heartbeat_interval)
+            if self.connected and self.game:
+                packet = Packet(REQUEST_HEARTBEAT_UPDATE, self.heartbeat_payload())
+                self.send(packet, self.on_heartbeat)
 
     async def _handle_user_connection(self, connection: ClientConnection):
         """Handle the connection after handshake - process the packet queue."""
