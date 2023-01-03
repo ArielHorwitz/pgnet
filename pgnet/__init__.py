@@ -11,7 +11,7 @@ be event-driven and yield to the asyncio event loop. For a GUI solution, conside
 *[mousefox](https://github.com/ArielHorwitz/mousefox)*.
 
 ## Local server
-Create a client:
+Create a local client:
 ```python3
 client = Client.local(game=Game, username="player")
 ```
@@ -42,7 +42,9 @@ def response_callback(response: pgnet.Response):
 client.send(pgnet.Packet("Hello world"), response_callback)
 ```
 
-### Example script
+## Local server example script
+This example is simply a minimal code example, and avoids using events. Normally you
+should use an asynchronous and event-drive UI.
 ```python3
 # main.py - use classes from `pgnet.examples` for demonstration
 
@@ -57,13 +59,13 @@ async def main():
     client = Client.local(game=Game, username="player")
     # Connect
     asyncio.create_task(client.async_connect())
-    await asyncio.sleep(1)  # wait for the packet to be processed
+    await asyncio.sleep(1)  # wait instead of using client events
     # Send a packet
     client.send(pgnet.Packet("Hello world!"), response_callback)
-    await asyncio.sleep(1)  # wait for the packet to be processed
+    await asyncio.sleep(1)  # wait instead of using client events
     # Send another packet
     client.send(pgnet.Packet("Goodbye."), response_callback)
-    await asyncio.sleep(1)  # wait for the packet to be processed
+    await asyncio.sleep(1)  # wait instead of using client events
 
 def response_callback(response: pgnet.Response):
     # Callback for responses. Simply print them.

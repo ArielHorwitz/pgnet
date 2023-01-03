@@ -148,6 +148,8 @@ class Server:
     By default, the server is configured to listen on localhost. To listen
     globally, set *`listen_globally`* and *`admin_password`*. Make sure that any
     required network rules are set (e.g. port forwarding).
+
+    For games to save and load, *save_file* must be set.
     """
 
     def __init__(
@@ -176,7 +178,8 @@ class Server:
             require_user_password: Require that users have non-empty passwords.
             on_connection: Callback for when a username connects or disconnects.
             verbose_logging: Log *all* packets and responses.
-            save_file: Location of file to save and load server sessions.
+            save_file: Location of file to save and load server sessions. Required for
+                saving and loading games. See also: `pgnet.Game.get_save_string`.
         """
         if listen_globally and not admin_password:
             raise RuntimeError("Cannot listen globally without admin password.")
@@ -212,8 +215,8 @@ class Server:
             on_start: Callback for when the server is online and handling messages.
 
         Returns:
-            Exit code as given by the `shutdown` command. -1 indicates a
-                request to reboot the server.
+            Exit code as given by the `shutdown` command. A value of -1 indicates a
+                request to reboot.
         """
         if self._stop:
             raise RuntimeError("Cannot run the server more than once concurrently.")
@@ -235,7 +238,10 @@ class Server:
         return result
 
     def shutdown(self, result: int = 0, /):
-        """Stop the server."""
+        """Stop the server.
+
+        The *result* is passed as the return value (exit code) for `Server.async_run`.
+        """
         if self._stop and not self._stop.done():
             self._stop.set_result(result)
 
@@ -248,7 +254,7 @@ class Server:
 
     @property
     def pubkey(self) -> str:
-        """Public key for end to end encryption."""
+        """Public key used for end to end encryption."""
         return self._key.pubkey
 
     async def _listening_loop(self, stop_future: asyncio.Future):

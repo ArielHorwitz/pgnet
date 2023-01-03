@@ -53,6 +53,7 @@ class ClientConnection(Connection):
 class Client:
     """The client that manages communication with the server.
 
+    ## Initializing
     This class should not be initialized directly, instead use `Client.remote` or
     `Client.local`.
     ```python3
@@ -62,17 +63,19 @@ class Client:
     local_client = Client.local(game=MyGame, username="player")
     ```
 
+    ## Connecting and starting a game
     Use `Client.async_connect` to connect to the server. Once connected, use
     `Client.get_games_dir`, `Client.create_game`, `Client.join_game`, and
     `Client.leave_game` to join or leave a game.
 
-    It is possible to bind callbacks to client events by subclassing and overriding or
-    by setting `Client.on_connection`, `Client.on_status`, and `Client.on_game`.
-
+    ## Using the packet queue
     When in game (`Client.game` is not *None*), use `Client.send` to send a
     `pgnet.Packet` to `pgnet.Game.handle_game_packet` and receive a `pgnet.Response`.
 
-    For extra security, use `verify_server_pubkey` when using a remote client.
+    ## Client events
+    It is possible to bind callbacks to client events by subclassing and overriding or
+    by setting `Client.on_connection`, `Client.on_status`, and `Client.on_game`.
+
     """
 
     def __init__(
@@ -87,7 +90,7 @@ class Client:
     ):
         """This class should not be initialized directly.
 
-        .. note:: Use `Client.remote` or `Client.local` to create a client.
+        .. note:: Use `Client.local` or `Client.remote` to create a client.
         """
         self._key: Key = Key()
         self._status: str = "New client."
@@ -104,35 +107,6 @@ class Client:
         self._port = port
         self._server = server
         self._verify_server_pubkey = verify_server_pubkey
-
-    @classmethod
-    def remote(
-        cls,
-        *,
-        address: str,
-        username: str,
-        password: str = "",
-        port: int = DEFAULT_PORT,
-        verify_server_pubkey: str = "",
-    ) -> "Client":
-        """Create a client that connects to a remote server. See also `Client.local`.
-
-        Args:
-            address: Server IP address.
-            username: The user's username.
-            password: The user's password.
-            port: Server port number.
-            verify_server_pubkey: If provided, will compare against the public key of
-                the server and disconnect if they do not match.
-        """
-        return cls(
-            address=address,
-            username=username,
-            password=password,
-            port=port,
-            server=None,
-            verify_server_pubkey=verify_server_pubkey,
-        )
 
     @classmethod
     def local(
@@ -172,6 +146,35 @@ class Client:
             verify_server_pubkey=server.pubkey,
         )
 
+    @classmethod
+    def remote(
+        cls,
+        *,
+        address: str,
+        username: str,
+        password: str = "",
+        port: int = DEFAULT_PORT,
+        verify_server_pubkey: str = "",
+    ) -> "Client":
+        """Create a client that connects to a remote server. See also `Client.local`.
+
+        Args:
+            address: Server IP address.
+            username: The user's username.
+            password: The user's password.
+            port: Server port number.
+            verify_server_pubkey: If provided, will compare against the public key of
+                the server and disconnect if they do not match.
+        """
+        return cls(
+            address=address,
+            username=username,
+            password=password,
+            port=port,
+            server=None,
+            verify_server_pubkey=verify_server_pubkey,
+        )
+
     async def async_connect(self):
         """Connect to a server.
 
@@ -187,19 +190,9 @@ class Client:
             logger.debug("Connecting locally...")
             return await self._async_connect_local()
 
-    @property
-    def connected(self) -> bool:
-        """If we are connected to the server."""
-        return self._connected
-
     def close(self):
         """Close the connection."""
         self._do_close = True
-
-    @property
-    def status(self) -> str:
-        """Latest status of the client."""
-        return self._status
 
     def get_games_dir(self, callback: Callable, /):
         """Get the games directory from the server and pass the response to callback."""
@@ -209,8 +202,8 @@ class Client:
         self,
         name: str,
         /,
-        password: Optional[str] = None,
         *,
+        password: Optional[str] = None,
         callback: Optional[ResponseCallback] = None,
     ):
         """Request from the server to join a game."""
@@ -223,8 +216,8 @@ class Client:
         self,
         name: str,
         /,
-        password: Optional[str] = None,
         *,
+        password: Optional[str] = None,
         callback: Optional[ResponseCallback] = None,
     ):
         """Request from the server to join a game."""
@@ -240,11 +233,6 @@ class Client:
     ):
         """Request from the server to leave the game."""
         self.send(Packet(REQUEST_LEAVE_GAME), callback, do_next=True)
-
-    @property
-    def game(self) -> Optional[str]:
-        """Currently joined game name."""
-        return self._game
 
     def send(
         self,
@@ -277,16 +265,31 @@ class Client:
         self._packet_queue = []
 
     def on_connection(self, connected: bool):
-        """Called when connected or disconnected."""
+        """Called when connected or disconnected. See also: `Client.connected`."""
         pass
+
+    @property
+    def connected(self) -> bool:
+        """If we are connected to the server. See also: `Client.on_connection`."""
+        return self._connected
 
     def on_status(self, status: str):
-        """Called with feedback on client status."""
+        """Called with feedback on client status. See also: `Client.status`."""
         pass
 
+    @property
+    def status(self) -> str:
+        """Last status feedback message. See also: `Client.on_status`."""
+        return self._status
+
     def on_game(self, game_name: str):
-        """Called when joining or leaving a game."""
+        """Called when joining or leaving a game. See also: `Client.game`."""
         pass
+
+    @property
+    def game(self) -> Optional[str]:
+        """Currently joined game name. See also: `Client.on_game`."""
+        return self._game
 
     def on_heartbeat(self, heartbeat: Response):
         """Override this method to implement heartbeat updates.

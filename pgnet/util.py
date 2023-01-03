@@ -43,13 +43,13 @@ class CipherError(Exception):
 class Packet:
     """The dataclass used to send messages from client to server.
 
-    Payload must be JSON-able.
+    Clients need only concern themselves with `Packet.message` and `Packet.payload`.
     """
 
     message: str
     """Message text."""
     payload: dict = field(default_factory=dict, repr=False)
-    """Dictionary of arbitrary data."""
+    """Dictionary of arbitrary data. Must be JSON-able."""
     created_on: Optional[str] = None
     """The creation time of the packet."""
     username: Optional[str] = None
@@ -91,13 +91,14 @@ class Packet:
 class Response:
     """The dataclass used to respond from server to client.
 
-    Payload must be JSON-able.
+    Games and Clients need only concern themselves with `Response.message`,
+    `Response.payload`, and `Response.status`.
     """
 
     message: str
     """Message text."""
     payload: dict = field(default_factory=dict, repr=False)
-    """Dictionary of arbitrary data."""
+    """Dictionary of arbitrary data. Must be JSON-able."""
     status: int = STATUS_OK
     """Status code for handling the request that this is responding to."""
     created_on: Optional[str] = None
@@ -273,7 +274,10 @@ class Game:
     """
 
     persistent: bool = False
-    """Set as persistent to allow the game to persist even without players."""
+    """Set as persistent to allow the game to persist even without players.
+
+    This is required for saving and loading (see also: `Game.get_save_string`).
+    """
     heartbeat_rate: float = 10
     """How many times per second the client should check for updates.
 
@@ -301,8 +305,8 @@ class Game:
     def handle_packet(self, packet: Packet) -> Response:
         """Packet handling for heartbeat updates and game requests.
 
-        Most cases should not override this method, rather override
-        `Game.handle_game_packet` and `Game.handle_heartbeat`.
+        Most use cases should override `Game.handle_game_packet` and
+        `Game.handle_heartbeat` instead of this method.
         """
         if packet.message == REQUEST_HEARTBEAT_UPDATE:
             return self.handle_heartbeat(packet)
@@ -324,9 +328,11 @@ class Game:
     def get_save_string(self) -> str:
         """Override this method to save game data to disk.
 
-        This method is called by the server when shutting down. In the next session,
-        the server will recreate the game with this string passed as *`save_string`* to
-        `Game.__init__`.
+        If `Game.persistent`, this method is called by the server periodically and when
+        shutting down. In the next session, the server will recreate the game with this
+        string passed as *`save_string`* to `Game.__init__`.
+
+        .. note:: `Server` must be configured to enable saving and loading.
         """
         return ""
 
@@ -339,7 +345,7 @@ class Game:
 
 
 def enable_logging(enable: bool = True, /):
-    """Enable/disable logging from the pgnet library."""
+    """Enable/disable logging from the PGNet library."""
     if enable:
         logger.enable("pgnet")
     else:
