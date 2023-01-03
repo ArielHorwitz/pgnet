@@ -4,13 +4,12 @@ PGNet is a server-client framework for games written in Python.
 
 
 ## Features
-* Minimum effort to connect game to server, and client to UI
+* Minimum boilerplate
 * A single server can host many games in a lobby automagically
-* Localhost option that saves you from writing separate interfaces for local and online
-    play
-* CLI client for developers and server admins
+* Local client that saves you from writing separate interfaces for local and online play
 * End-to-end encryption
-* Hopefully a concise API
+* CLI client for developers and server admins
+
 
 ## Limitation
 * No concurrency beyond async on a single thread (bad for CPU-intensive games)
