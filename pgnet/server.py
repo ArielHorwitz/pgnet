@@ -37,7 +37,6 @@ AUTOSAVE_INTERVAL = 300  # 5 minutes
 MAX_USERNAME_LEN = 20
 RE_WHITESPACE = re.compile(r"\W")
 SALT_SIZE = 20
-DEFAULT_SAVE_FILE = ".pgnet-server-data.json"
 
 
 @dataclass
@@ -160,7 +159,7 @@ class Server:
         port: int = DEFAULT_PORT,
         admin_password: Optional[str] = None,
         registration_enabled: bool = True,
-        require_user_password: bool = True,
+        require_user_password: bool = False,
         on_connection: Optional[Callable[[str, bool], Any]] = None,
         verbose_logging: bool = False,
         save_file: Optional[str | Path] = None,
@@ -191,17 +190,17 @@ class Server:
         self._connections: dict[str, Optional[UserConnection]] = {}
         self._kicked_users: set[str] = set()
         self._game_cls: Type[Game] = game
-        self._save_file: Path = Path(save_file or DEFAULT_SAVE_FILE)
+        self._save_file: Optional[Path] = None if save_file is None else Path(save_file)
         self._address: str = "" if listen_globally else "localhost"
         self._port: int = port
         self.registration_enabled: bool = registration_enabled
         self.on_connection: Optional[Callable[[str, bool], Any]] = on_connection
         self.verbose_logging: bool = verbose_logging
-        logger.debug(f"{self._save_file.absolute()=}")
+        self._load_from_disk()
+        logger.debug(f"{self._save_file=}")
         logger.debug(f"{self._game_cls=}")
         logger.debug(f"{self._key=}")
         print(f"{admin_password=}")  # Use print instead of logger for password
-        self._load_from_disk()
 
     async def async_run(self, *, on_start: Optional[Callable] = None) -> int:
         """Start the server.
@@ -591,8 +590,8 @@ class Server:
 
     def _admin_save(self, packet: Packet) -> Response:
         """Save all server data to file."""
-        self._save_to_disk()
-        return Response(f"Saved server data to disk: {self._save_file}")
+        success = self._save_to_disk()
+        return Response(f"Saved {success=} server data to disk: {self._save_file}")
 
     def _admin_verbose(self, packet: Packet) -> Response:
         """Toggle verbose logging.
@@ -631,8 +630,10 @@ class Server:
         time.sleep(s)
         return Response(f"Slept for {s} seconds")
 
-    def _save_to_disk(self):
+    def _save_to_disk(self) -> bool:
         """Save all data to disk."""
+        if not self._save_file:
+            return False
         game_data = []
         for game in self._games.values():
             save_string = game.get_save_string()
@@ -661,9 +662,10 @@ class Server:
             f"Saved server data to {self._save_file}"
             f" ({len(users)} users and {len(game_data)} games)"
         )
+        return True
 
     def _load_from_disk(self):
-        if not self._save_file.is_file():
+        if not self._save_file or not self._save_file.is_file():
             return
         logger.info(f"Loading server data from {self._save_file}")
         with open(self._save_file) as f:
