@@ -26,7 +26,10 @@ ResponseCallback = Callable[[Response], Any]
 
 @dataclass
 class ClientConnection(Connection):
-    """Subclass of Connection with a combined method for sending and receiving."""
+    """Thin wrapper for `pgnet.util.Connection`.
+
+    Provides `ClientConnection.send_recv` for combined sending and receiving.
+    """
 
     game: Optional[str] = None
     _websocket_busy: bool = False
@@ -61,7 +64,7 @@ class Client:
 
     ## Connecting and starting a game
     Use `Client.async_connect` to connect to the server. Once connected, use
-    `Client.get_games_dir`, `Client.create_game`, `Client.join_game`, and
+    `Client.get_game_dir`, `Client.create_game`, `Client.join_game`, and
     `Client.leave_game` to join or leave a game.
 
     ## Using the packet queue
@@ -119,7 +122,7 @@ class Client:
         Only the *game* and *username* arguments are required.
 
         Args:
-            game: `Game` class to pass to the local server.
+            game: `pgnet.Game` class to pass to the local server.
             username: The user's username.
             password: The user's password.
             port: Server port number.
@@ -159,8 +162,8 @@ class Client:
             username: The user's username.
             password: The user's password.
             port: Server port number.
-            verify_server_pubkey: If provided, will compare against the public key of
-                the server and disconnect if they do not match.
+            verify_server_pubkey: If provided, will compare against the
+                `pgnet.Server.pubkey` of the server and disconnect if they do not match.
         """
         return cls(
             address=address,
@@ -189,7 +192,7 @@ class Client:
         """Close the connection."""
         self._do_disconnect = True
 
-    def get_games_dir(self, callback: Callable, /):
+    def get_game_dir(self, callback: Callable, /):
         """Get the games directory from the server and pass the response to callback."""
         self.send(Packet(REQUEST.GAME_DIR), callback, do_next=True)
 
@@ -201,7 +204,7 @@ class Client:
         password: Optional[str] = None,
         callback: Optional[ResponseCallback] = None,
     ):
-        """Request from the server to join a game."""
+        """Request from the server to create and join a game."""
         payload = dict(name=name)
         if password:
             payload["password"] = password
@@ -236,10 +239,11 @@ class Client:
         /,
         do_next: bool = False,
     ):
-        """Add a packet to the queue.
+        """Add a `pgnet.Packet` to the queue.
 
-        If a callback was given, the response will be passed to it. Callbacks are not
-        ensured, as the queue can be arbitrarily cleared using `Client.flush_queue`.
+        If a callback was given, the `pgnet.Response` will be passed to it. Callbacks
+        are not ensured, as the queue can be arbitrarily cleared using
+        `Client.flush_queue`.
         """
         if not self._connected:
             logger.warning(f"Cannot queue packets while disconnected: {packet}")
@@ -254,7 +258,10 @@ class Client:
             self._packet_queue.append(packet_callback)
 
     def flush_queue(self):
-        """Clear packets and their respective callbacks from the queue."""
+        """Clear packets and their respective callbacks from the queue.
+
+        See also: `Client.send`.
+        """
         if self._packet_queue:
             logger.debug(f"Discarding messages:  {self._packet_queue}")
         self._packet_queue = []
@@ -277,7 +284,7 @@ class Client:
         """Last status feedback message. See also: `Client.on_status`."""
         return self._status
 
-    def on_game(self, game_name: str):
+    def on_game(self, game_name: Optional[str]):
         """Called when joining or leaving a game. See also: `Client.game`."""
         pass
 
@@ -291,6 +298,8 @@ class Client:
 
         The *heartbeat* Response is given by `pgnet.util.Game.handle_heartbeat`. The
         heartbeat rate is set by `pgnet.util.Game.heartbeat_rate`.
+
+        See also: `Client.heartbeat_payload`.
         """
         pass
 
@@ -299,6 +308,8 @@ class Client:
 
         This payload is passed to `pgnet.util.Game.handle_heartbeat`. The heartbeat rate
         is set by `pgnet.util.Game.heartbeat_rate`.
+
+        See also: `Client.on_heartbeat`.
         """
         return dict()
 
@@ -471,4 +482,5 @@ class Client:
 
 __all__ = (
     "Client",
+    "ClientConnection",
 )

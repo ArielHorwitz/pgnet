@@ -118,7 +118,10 @@ class User:
 
 @dataclass
 class UserConnection(Connection):
-    """Subclass of Connection with de/serialization and server-related attributes."""
+    """Thin wrapper for `pgnet.util.Connection`.
+
+    Provides serialization and deserialization.
+    """
 
     username: Optional[str] = None
     game: Optional[str] = None
@@ -135,7 +138,7 @@ class UserConnection(Connection):
 
 @dataclass
 class LobbyGame:
-    """`Game` instance wrapper for management by server."""
+    """`pgnet.Game` instance wrapper for management by server."""
 
     game: Game = field(repr=False)
     name: str
@@ -173,8 +176,8 @@ class LobbyGame:
         return None
 
     @property
-    def expired(self):
-        """If the game is over and can be deleted."""
+    def expired(self) -> bool:
+        """If the game is empty and not persistent."""
         return not self.connected_users and not self.game.persistent
 
     def handle_packet(self, packet: Packet) -> Response:
@@ -190,14 +193,17 @@ class LobbyGame:
 class Server:
     """The server that hosts games.
 
-    Subclass from `Game` and pass it as the *game* argument for the server. Then,
-    use the `Server.async_run` coroutine to start the server.
+    Subclass from `pgnet.Game` and pass it as the *`game`* argument for the server.
+    Then, use the `Server.async_run` coroutine to start the server.
 
     By default, the server is configured to listen on localhost. To listen
-    globally, set *`listen_globally`* and *`admin_password`*. Make sure that any
-    required network rules are set (e.g. port forwarding).
+    globally, set *`listen_globally`* and *`admin_password`*.
 
-    For games to save and load, *save_file* must be set.
+    For games to save and load, *`save_file`* must be set (see also:
+    `pgnet.Game.get_save_string`).
+
+    .. note:: Most home networks require port forwarding to be discoverable by remote
+        clients.
     """
 
     def __init__(
@@ -218,16 +224,14 @@ class Server:
 
         Args:
             listen_globally: Listen globally instead of localhost only.
-                Requires that admin_password must be set.
+                Requires that *`admin_password`* must be set.
             port: Port number to listen on.
             admin_password: Password for admin user with elevated priviliges.
-                Must be set to listen globally.
             registration_enabled: Allow new users to register.
             require_user_password: Require that users have non-empty passwords.
             on_connection: Callback for when a username connects or disconnects.
             verbose_logging: Log *all* packets and responses.
-            save_file: Location of file to save and load server sessions. Required for
-                saving and loading games. See also: `pgnet.Game.get_save_string`.
+            save_file: Location of file to save and load server sessions.
         """
         if listen_globally and not admin_password:
             raise RuntimeError("Cannot listen globally without admin password.")
@@ -763,4 +767,9 @@ class Server:
 
 __all__ = (
     "Server",
+    "LobbyGame",
+    "User",
+    "UserConnection",
+    "is_username_allowed",
+    "is_gamename_allowed",
 )

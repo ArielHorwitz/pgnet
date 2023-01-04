@@ -54,7 +54,7 @@ class STATUS:
 
 
 class DisconnectedError(Exception):
-    """Raised when a connection should is or should be closed.
+    """Raised when a connection has been or should be closed.
 
     The cause of the error is passed as the first argument as a string.
     """
@@ -131,9 +131,9 @@ class Response:
     created_on: Optional[str] = None
     """The creation time of the packet."""
     disconnecting: bool = field(default=False, repr=False)
-    """Used to notify that the connection is being closed."""
+    """Used by the server to notify the client that the connection is being closed."""
     game: Optional[str] = field(default=None, repr=False)
-    """The game name that this connection has joined."""
+    """Used by the server to notify the client of their current game name."""
 
     def __post_init__(self):
         """Set creation date."""
@@ -209,14 +209,12 @@ class Tunnel:
 class Key:
     """A key manager for end to end encryption of strings.
 
-    Each instance of this class represents a private-public key pair. It can
-    also generate Tunnels (shared keys) with other public keys by using
-    `Key.get_tunnel`. These let you encrypt and decrypt messages with other
-    public keys.
+    Each instance of this class represents a private-public key pair. It can also
+    generate a `Tunnel` (shared key) with other public keys by using `Key.get_tunnel`.
+    These let you encrypt and decrypt messages with other public keys.
 
-    The Key and Tunnel classes are thin wrappers around pynacl's PrivateKey
-    and Box classes that can handle public keys and messages as strings. If
-    this is not required, it is recommended to use pynacl's API directly.
+    The `Key` and `Tunnel` classes are thin wrappers around `pynacl`'s `PrivateKey` and
+    `Box` classes that can handle public keys and messages as strings.
     """
 
     def __init__(self):
@@ -231,7 +229,7 @@ class Key:
         return self._public_key.encode(encoder=Base64Encoder).decode()
 
     def get_tunnel(self, pubkey: str) -> Tunnel:
-        """Get a Tunnel for the given pubkey."""
+        """Get a `Tunnel` for a given pubkey."""
         tunnel = self._tunnels.get(pubkey)
         if not tunnel:
             tunnel = self._tunnels[pubkey] = Tunnel(self._private_key, pubkey)
@@ -244,15 +242,22 @@ class Key:
 
 @dataclass
 class Connection:
-    """A wrapper for a websockets' websocket with end to end encryption.
+    """Wrapper for `websocket` with end to end encryption.
 
-    Methods will raise a DisconnectedError with the reason for failing to
-    communicate with the websocket.
+    Methods will raise a `DisconnectedError` with the reason for failing to communicate
+    with the websocket.
     """
 
     websocket: WebSocket = field(repr=False)
+    """The websocket of this connection."""
     tunnel: Optional[Tunnel] = None
+    """The `Tunnel` assigned for this connection.
+
+    If set, packets sent and responses received will be encrypted and decrypted using
+    the tunnel.
+    """
     remote: str = ""
+    """Full address of the other end of the connection."""
 
     def __post_init__(self):
         """Set the remote from the websocket."""
@@ -263,7 +268,7 @@ class Connection:
 
     @staticmethod
     def _exception_disconnect(f: Callable, /):
-        """Decorator raising DisconnecetedError on connection or cipher exceptions."""
+        """Decorator raising `DisconnecetedError` on connection or cipher exceptions."""
         @functools.wraps(f)
         async def wrapper(*args, **kwargs):
             try:
@@ -278,14 +283,20 @@ class Connection:
 
     @_exception_disconnect
     async def send(self, message: str, /, *, timeout: float = 5.0):
-        """Send a string to `self.websocket`, encrypt if `self.tunnel` is set."""
+        """Send a string to `Connection.websocket`.
+
+        Will be encrypted using `Connection.tunnel` if set.
+        """
         if self.tunnel:
             message = self.tunnel.encrypt(message)
         await asyncio.wait_for(self.websocket.send(message), timeout=timeout)
 
     @_exception_disconnect
     async def recv(self, *, timeout: float = 5.0) -> str:
-        """Receive a string from `self.websocket`, decrypt if `self.tunnel` is set."""
+        """Receive a string from `Connection.websocket`.
+
+        Will be decrypted using `Connection.tunnel` if set.
+        """
         message: str = await asyncio.wait_for(self.websocket.recv(), timeout=timeout)
         if self.tunnel:
             message = self.tunnel.decrypt(message)
@@ -299,8 +310,7 @@ class Connection:
 class Game:
     """Subclass to implement game logic.
 
-    This class should not be initialized directly, it is initialized by the
-    server.
+    This class should not be initialized directly, it is initialized by the server.
     """
 
     persistent: bool = False
@@ -311,7 +321,7 @@ class Game:
     heartbeat_rate: float = 10
     """How many times per second the client should check for updates.
 
-    See `Game.handle_heartbeat` and `pgnet.Client.on_heartbeat`.
+    See `Game.handle_heartbeat`.
     """
 
     def __init__(self, name: str, save_string: Optional[str] = None):
@@ -343,14 +353,21 @@ class Game:
         return self.handle_game_packet(packet)
 
     def handle_game_packet(self, packet: Packet) -> Response:
-        """Override this method to implement packet handling."""
+        """Override this method to implement packet handling.
+
+        See also: `pgnet.Client.send`.
+        """
         return Response(
             f"No packet handling configured for {self.__class__.__qualname__}",
             status=STATUS.UNEXPECTED,
         )
 
     def handle_heartbeat(self, packet: Packet) -> Response:
-        """Override this method to implement heartbeat updates."""
+        """Override this method to implement heartbeat updates.
+
+        See also: `Game.heartbeat_rate`, `pgnet.Client.heartbeat_payload`,
+        `pgnet.Client.on_heartbeat`.
+        """
         return Response(
             f"No heartbeat update configured for {self.__class__.__qualname__}"
         )
@@ -362,7 +379,7 @@ class Game:
         shutting down. In the next session, the server will recreate the game with this
         string passed as *`save_string`* to `Game.__init__`.
 
-        .. note:: `Server` must be configured to enable saving and loading.
+        .. note:: `pgnet.Server` must be configured to enable saving and loading.
         """
         return ""
 
@@ -383,10 +400,15 @@ def enable_logging(enable: bool = True, /):
 
 
 __all__ = (
-    "enable_logging",
     "Game",
     "Packet",
     "Response",
     "STATUS",
     "REQUEST",
+    "Tunnel",
+    "Key",
+    "Connection",
+    "CipherError",
+    "DisconnectedError",
+    "enable_logging",
 )
