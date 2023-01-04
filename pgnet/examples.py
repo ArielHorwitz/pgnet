@@ -1,4 +1,8 @@
-"""A simple example implementation of a game and client."""
+"""A simple example implementation of a game and client.
+
+These examples are best viewed from [source](
+https://github.com/ArielHorwitz/pgnet/blob/master/pgnet/examples.py).
+"""
 
 import functools
 from typing import Optional
@@ -46,7 +50,16 @@ class ExampleClient(Client):
 
     log = []
     on_status = functools.partial(print, ">> STATUS:")
+    """Print client status feedback."""
     on_game = functools.partial(print, ">> GAME:")
+    """Print client game changes."""
+
+    def on_connection(self, connected: bool):
+        """Print connection changes and auto create a game when connected."""
+        print(">> CONNECTION:", connected)
+        if connected:
+            self.create_game("test")  # Will auto join if created
+            # self.join_game("test")  # Use this in case game already exists
 
     def on_heartbeat(self, heartbeat: Response):
         """Save and print the log if changed."""
@@ -55,13 +68,6 @@ class ExampleClient(Client):
             self.log = game_log
             print("New log:")
             print("\n".join(f"-- {_}" for _ in game_log))
-
-    def on_connection(self, connected: bool):
-        """Automatically create and join a game when connected."""
-        print(">> CONNECTION:", connected)
-        if connected:
-            self.create_game("test")  # Will auto join if created
-            # self.join_game("test")  # Use this in case game already exists
 
 
 __all__ = (
