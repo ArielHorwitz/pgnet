@@ -139,7 +139,7 @@ class LobbyGame:
 
     game: Game = field(repr=False)
     name: str
-    password: Optional[str]
+    password: str
     connected_users: set[str] = field(default_factory=set)
 
     @property
@@ -361,7 +361,7 @@ class Server:
         # Authenticate
         packet = await connection.recv()
         username = packet.payload.get("username")
-        password = packet.payload.get("password")
+        password = packet.payload.get("password", "")
         fail = self._check_auth(username, password)
         if fail:
             # Respond with problem and disconnect
@@ -498,7 +498,7 @@ class Server:
     def _create_game(
         self,
         name: str,
-        password: Optional[str] = None,
+        password: str = "",
         game_data: Optional[str] = None,
     ) -> LobbyGame:
         """Create a new game."""
@@ -530,7 +530,7 @@ class Server:
         game = self._games.get(new_name)
         if not game:
             return self._handle_create_game(packet)
-        password = packet.payload.get("password")
+        password = packet.payload.get("password", "")
         fail = game.add_user(packet.username, password)
         if fail:
             return Response(f"Failed to join game: {fail}", status=STATUS.UNEXPECTED)
@@ -556,7 +556,7 @@ class Server:
             return Response("Game name not allowed.", status=STATUS.UNEXPECTED)
         if game_name in self._games:
             return Response("Game name already exists.", status=STATUS.UNEXPECTED)
-        password = packet.payload.get("password")
+        password = packet.payload.get("password", "")
         game = self._create_game(game_name, password)
         fail = game.add_user(packet.username, password)
         assert not fail
