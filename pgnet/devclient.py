@@ -6,6 +6,7 @@ import arrow
 import asyncio
 import aioconsole
 from .server import Server
+from .client import Client
 from .util import (
     Packet,
     Response,
@@ -53,7 +54,7 @@ class DevCLI:
         address = input("Enter address (leave blank for localhost): ") or "localhost"
         port = int(input("Enter port (leave blank for default): ") or DEFAULT_PORT)
         pubkey = input("Enter pubkey to verify (leave blank to ignore): ") or ""
-        return ExampleClient.remote(
+        return Client.remote(
             username=username,
             password=password,
             address=address,
@@ -123,7 +124,7 @@ def run():
     Will parse the first argument from `sys.argv`:
     * `no argument`: run locally using `pgnet.ExampleClient` and `pgnet.ExampleGame`
     * `"-s"` or `"--server"`: run a server using `pgnet.ExampleGame`
-    * `"-r"` or `"--remote"`: connect to a remote server
+    * `"-r"` or `"--remote"`: connect to a remote server using `pgnet.Client`
     """
     arg = None
     if len(sys.argv) > 1:
