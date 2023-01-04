@@ -483,6 +483,7 @@ class Server:
         game.remove_user(username)
         if game.expired:
             del self._games[game.name]
+        logger.debug(f"User {username!r} removed from {game}")
 
     def _game_dir_response(self) -> Response:
         """Create a Response with dictionary of games details."""
@@ -506,6 +507,7 @@ class Server:
         game = self._game_cls(name, save_string=game_data)
         lobbygame = LobbyGame(game, name, password)
         self._games[name] = lobbygame
+        logger.debug(f"Created game: {lobbygame}")
         return lobbygame
 
     def _destroy_game(self, game_name: str):
@@ -515,6 +517,7 @@ class Server:
             self._remove_user_from_game(list(game.connected_users)[0])
         if game_name in self._games:
             del self._games[game_name]
+        logger.debug(f"Destroyed game: {game_name!r}")
 
     def _handle_join_game(self, packet: Packet) -> Response:
         """Handle a request to join the game specified in the payload."""
@@ -535,6 +538,7 @@ class Server:
         if fail:
             return Response(f"Failed to join game: {fail}", status=STATUS.UNEXPECTED)
         connection.game = new_name
+        logger.debug(f"User {packet.username!r} joined: {game}")
         return Response("Joined game.", dict(heartbeat_rate=game.heartbeat_rate))
 
     def _handle_leave_game(self, packet: Packet) -> Response:
@@ -543,6 +547,7 @@ class Server:
         if not name:
             return Response("Not in game.", status=STATUS.UNEXPECTED)
         self._remove_user_from_game(packet.username)
+        logger.debug(f"User {packet.username!r} left game: {name!r}")
         return Response("Left game.")
 
     def _handle_create_game(self, packet: Packet) -> Response:
@@ -561,6 +566,7 @@ class Server:
         fail = game.add_user(packet.username, password)
         assert not fail
         connection.game = game_name
+        logger.debug(f"User {packet.username!r} created game: {game}")
         return Response("Created new game.", dict(heartbeat_rate=game.heartbeat_rate))
 
     def _handle_game_packet(self, packet: Packet, game_name: str) -> Response:
