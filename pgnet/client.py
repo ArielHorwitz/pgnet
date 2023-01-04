@@ -179,11 +179,10 @@ class Client:
         password. Only after succesfully completing these steps will the client be
         considered connected and ready to process the packet queue from `Client.send`.
         """
+        logger.debug(f"Connecting... {self}")
         if self._server is None:
-            logger.debug("Connecting remotely...")
             return await self._async_connect_remote()
         else:
-            logger.debug("Connecting locally...")
             return await self._async_connect_local()
 
     def disconnect(self):
@@ -312,6 +311,7 @@ class Client:
         """
         if self._server_connection is not None:
             raise RuntimeError("Cannot open more than one connection per client.")
+        logger.debug("Connecting to server...")
         full_address = f"{self._address}:{self._port}"
         self._server_connection = websockets.connect(
             f"ws://{full_address}",
@@ -345,12 +345,13 @@ class Client:
             self._set_connection(False)
             self._server_connection = None
             self._set_status(f"Disconnected: {e.args[0]}")
-            logger.info(f"Connection terminated {self}")
+            logger.info(f"Connection terminated. {self}")
             return
         logger.warning(f"Connection terminated without DisconnectedError {connection}")
 
     async def _async_connect_local(self):
         """Wraps `Client._async_connect_remote to cleanup/teardown the local server."""
+        logger.debug("Setting up local server...")
         assert isinstance(self._server, Server)
         started = asyncio.Future()
         server_coro = self._server.async_run(on_start=lambda *a: started.set_result(1))
@@ -456,6 +457,16 @@ class Client:
             self._game = game_name
             if self.on_game:
                 self.on_game(game_name)
+
+    def __repr__(self):
+        """Object repr."""
+        local = "(local) " if self._server else ""
+        conn = "connected" if self.connected else "disconnected"
+        return (
+            f"<{self.__class__.__qualname__} {local}{self._username!r}"
+            f" {conn}, {self._address}:{self._port}"
+            f" @ {id(self):x}>"
+        )
 
 
 __all__ = (

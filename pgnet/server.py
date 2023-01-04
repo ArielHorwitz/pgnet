@@ -745,12 +745,13 @@ class Server:
         status=STATUS.UNEXPECTED,
     )
 
-    def __repr__(self) -> str:
+    def __repr__(self):
         """Object repr."""
+        address = self._address or "public"
         return (
-            f"<{self.__class__.__qualname__} "
-            f"address={self._address!r} port={self._port!r} "
-            f"{id(self)}>"
+            f"<{self.__class__.__qualname__}"
+            f" serving {address}:{self._port}"
+            f" @ {id(self):x}>"
         )
 
 

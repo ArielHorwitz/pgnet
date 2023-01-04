@@ -79,7 +79,7 @@ class Packet:
     """Dictionary of arbitrary data. Must be JSON-able."""
     created_on: Optional[str] = None
     """The creation time of the packet."""
-    username: Optional[str] = None
+    username: Optional[str] = field(default=None, repr=False)
     """Used by the server for identification.
 
     Setting this on the client side has no effect.
@@ -130,9 +130,9 @@ class Response:
     """Status code for handling the request that this is responding to."""
     created_on: Optional[str] = None
     """The creation time of the packet."""
-    disconnecting: bool = False
+    disconnecting: bool = field(default=False, repr=False)
     """Used to notify that the connection is being closed."""
-    game: Optional[str] = None
+    game: Optional[str] = field(default=None, repr=False)
     """The game name that this connection has joined."""
 
     def __post_init__(self):
@@ -161,7 +161,10 @@ class Response:
     @property
     def debug_repr(self) -> str:
         """Repr with more data."""
-        return f"{self!r}+{self.payload}"
+        return (
+            f"{self!r}(game={self.game!r}, disconnecting={self.disconnecting})"
+            f"+{self.payload}"
+        )
 
 
 class Tunnel:
