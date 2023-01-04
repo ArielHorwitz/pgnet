@@ -30,9 +30,61 @@ from .util import (
 
 GAME_UPDATE_INTERVAL = 0.1
 AUTOSAVE_INTERVAL = 300  # 5 minutes
-MAX_USERNAME_LEN = 20
-RE_WHITESPACE = re.compile(r"\W")
 SALT_SIZE = 20
+
+_re_whitespace = re.compile(r"\W")
+_re_non_alnum = re.compile(r"[^a-zA-Z\d\s]")
+_re_start_whitespace = re.compile(r"^\W")
+_re_end_whitespace = re.compile(r"\W$")
+
+
+def _check_name(
+    name: str,
+    /,
+    *,
+    min_len: int = 3,
+    max_len: int = 20,
+    allow_whitespace: bool = False,
+    alnum_only: bool = True,
+    allow_lead_trail_whitespace: bool = False,
+) -> bool:
+    """If a string matches criteria of arguments."""
+    if ADMIN_USERNAME.lower() in name.lower():
+        return False
+    if len(name) > max_len:
+        return False
+    if len(name) < min_len:
+        return False
+    if not allow_whitespace and bool(_re_whitespace.search(name)):
+        return False
+    if alnum_only and bool(_re_non_alnum.search(name)):
+        return False
+    if not allow_lead_trail_whitespace:
+        if bool(_re_start_whitespace.search(name)):
+            return False
+        if bool(_re_end_whitespace.search(name)):
+            return False
+    return True
+
+
+def is_username_allowed(name: str, /) -> bool:
+    """If a username is allowed."""
+    return _check_name(
+        name,
+        max_len=20,
+        allow_whitespace=False,
+        alnum_only=True,
+    )
+
+
+def is_gamename_allowed(name: str, /) -> bool:
+    """If a game name is allowed."""
+    return _check_name(
+        name,
+        max_len=50,
+        allow_whitespace=True,
+        alnum_only=True,
+    )
 
 
 @dataclass
@@ -334,7 +386,7 @@ class Server:
             missing_password = self._require_user_password and not password
             if (
                 self.registration_enabled
-                and self._name_allowed(username)
+                and is_username_allowed(username)
                 and not missing_password
             ):
                 self._register_user(username, password)
@@ -349,15 +401,6 @@ class Server:
         if not user.compare_password(password):
             return "Incorrect password."
         return None
-
-    @staticmethod
-    def _name_allowed(name: str, /) -> bool:
-        """If a name is allowed."""
-        not_admin = ADMIN_USERNAME.lower() not in name.lower()
-        not_long = len(name) <= MAX_USERNAME_LEN
-        not_empty = len(name) > 0
-        no_whitespace = not bool(RE_WHITESPACE.search(name))
-        return not_admin and not_long and not_empty and no_whitespace
 
     def _register_user(self, username: str, password: str, /):
         """Register new user."""
@@ -481,7 +524,7 @@ class Server:
             return Response("Must leave game first.", status=STATUS.UNEXPECTED)
         new_name: Optional[str] = packet.payload.get("name")
         if not new_name:
-            return Response("Please specify a game.", status=STATUS.UNEXPECTED)
+            return Response("Please specify a game name.", status=STATUS.UNEXPECTED)
         if new_name == current_name:
             return Response("Already in game.", status=STATUS.UNEXPECTED)
         game = self._games.get(new_name)
@@ -490,7 +533,7 @@ class Server:
         password = packet.payload.get("password")
         fail = game.add_user(packet.username, password)
         if fail:
-            return Response(f"Failed to join: {fail}", status=STATUS.UNEXPECTED)
+            return Response(f"Failed to join game: {fail}", status=STATUS.UNEXPECTED)
         connection.game = new_name
         return Response("Joined game.", dict(heartbeat_rate=game.heartbeat_rate))
 
@@ -509,10 +552,10 @@ class Server:
         if current_game:
             return Response("Must leave game first.", status=STATUS.UNEXPECTED)
         game_name = packet.payload.get("name")
-        if not self._name_allowed(game_name):
-            return Response("Name not allowed.", status=STATUS.UNEXPECTED)
+        if not is_gamename_allowed(game_name):
+            return Response("Game name not allowed.", status=STATUS.UNEXPECTED)
         if game_name in self._games:
-            return Response("Name already exists.", status=STATUS.UNEXPECTED)
+            return Response("Game name already exists.", status=STATUS.UNEXPECTED)
         password = packet.payload.get("password")
         game = self._create_game(game_name, password)
         fail = game.add_user(packet.username, password)
@@ -580,15 +623,15 @@ class Server:
         """The "username" in payload will get kicked."""
         username = packet.payload.get("username", "")
         self.kick_username(username)
-        return Response(f"Kicked user {username!r}")
+        return Response(f"Kicked username {username!r}")
 
     def _admin_destroy(self, packet: Packet) -> Response:
         """Destroy the game specified in payload."""
         game_name = packet.payload.get("name", "")
         if game_name not in self._games:
-            return Response(f"No such game: {game_name}", status=STATUS.UNEXPECTED)
+            return Response(f"No such game: {game_name!r}", status=STATUS.UNEXPECTED)
         self._destroy_game(game_name)
-        return Response(f"Destroyed game: {game_name}")
+        return Response(f"Destroyed game: {game_name!r}")
 
     def _admin_save(self, packet: Packet) -> Response:
         """Save all server data to file."""
@@ -677,14 +720,16 @@ class Server:
             username = user["name"]
             if username == ADMIN_USERNAME:
                 continue
-            assert self._name_allowed(username)
+            if not is_username_allowed(username):
+                logger.warning(f"Loaded disallowed {username=}")
             self._users[username] = u = User(username, user["salt"], user["password"])
-            logger.debug(f"Loaded: {u}")
+            logger.debug(f"Loaded username: {u!r}")
         for game in data["games"]:
             game_name = game["name"]
-            assert self._name_allowed(game_name)
+            if not is_gamename_allowed(game_name):
+                logger.warning(f"Loaded disallowed {game_name=}")
             self._create_game(game_name, game["password"], game["data"])
-            logger.debug(f"Loaded: {self._games[game_name]}")
+            logger.debug(f"Loaded game: {self._games[game_name]!r}")
         self._kicked_users |= set(data["kicked_users"])
         self.registration_enabled = data["registration"]
         logger.debug("Loading disk data complete.")
