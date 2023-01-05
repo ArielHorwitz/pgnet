@@ -15,7 +15,7 @@ from .util import (
     Game,
     DEFAULT_PORT,
     DisconnectedError,
-    STATUS,
+    Status,
     REQUEST,
 )
 
@@ -395,7 +395,7 @@ class Client:
         handshake_payload = dict(username=self._username, password=self._password)
         packet = Packet("handshake", handshake_payload)
         response = await connection.send_recv(packet)
-        if response.status != STATUS.OK:
+        if response.status != Status.OK:
             m = response.message
             logger.info(m)
             raise DisconnectedError(m)
@@ -423,7 +423,7 @@ class Client:
             # Send and callback with response
             packet, callback = self._packet_queue.pop(0)
             response = await connection.send_recv(packet)
-            if response.status != STATUS.OK:
+            if response.status != Status.OK:
                 logger.info(f"Status code: {response.debug_repr}")
             self._handle_game_change(response)
             if callback:

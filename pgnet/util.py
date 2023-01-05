@@ -3,6 +3,7 @@
 from typing import Optional, Callable
 from loguru import logger
 import asyncio
+import enum
 import functools
 import arrow
 import json
@@ -38,7 +39,8 @@ class REQUEST:
     """Request a heartbeat update from the game."""
 
 
-class STATUS:
+@enum.unique
+class Status(enum.IntEnum):
     """Integer status codes for a `Response` to client requests.
 
     These are used internally by `pgnet.Server`. It is possible but not required to use
@@ -126,8 +128,8 @@ class Response:
     """Message text."""
     payload: dict = field(default_factory=dict, repr=False)
     """Dictionary of arbitrary data. Must be JSON-able."""
-    status: int = STATUS.OK
-    """Status code for handling the request that this is responding to."""
+    status: int = Status.OK
+    """`Status` code for handling the request that this is responding to."""
     created_on: Optional[str] = None
     """The creation time of the packet."""
     disconnecting: bool = field(default=False, repr=False)
@@ -359,7 +361,7 @@ class Game:
         """
         return Response(
             f"No packet handling configured for {self.__class__.__qualname__}",
-            status=STATUS.UNEXPECTED,
+            status=Status.UNEXPECTED,
         )
 
     def handle_heartbeat(self, packet: Packet) -> Response:
@@ -403,8 +405,8 @@ __all__ = (
     "Game",
     "Packet",
     "Response",
-    "STATUS",
     "REQUEST",
+    "Status",
     "Tunnel",
     "Key",
     "Connection",
