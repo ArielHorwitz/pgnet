@@ -1,6 +1,6 @@
 """Developer client - command line tool to interface with a server."""
 
-from typing import Optional
+from typing import Optional, Any
 import sys
 import arrow
 import asyncio
@@ -81,17 +81,14 @@ class DevCLI:
         await response
         self._log_response(response.result())
 
-    @staticmethod
-    def _parse_cli_packet(s: str, /) -> Optional[Packet]:
+    @classmethod
+    def _parse_cli_packet(cls, s: str, /) -> Optional[Packet]:
         try:
             parts = s.split(";")
             message = parts.pop(0)
             payload = {}
             for p in parts:
-                key, value = p.split("=", 1)
-                if value.isnumeric():
-                    i, f = int(value), float(value)
-                    value = i if i == f else f
+                key, value = cls._parse_part(p)
                 payload[key] = value
         except ValueError as e:
             print(
@@ -100,6 +97,22 @@ class DevCLI:
             )
             return None
         return Packet(message, payload)
+
+    @staticmethod
+    def _parse_part(part: str, /) -> tuple[str, Any]:
+        key, value = part.split("=", 1)
+        if value == "True":
+            value = True
+        elif value == "False":
+            value = False
+        elif value.isnumeric():
+            value = int(value)
+        else:
+            try:
+                value = float(value)
+            except ValueError:
+                pass
+        return key, value
 
     @staticmethod
     def _log_response(response: Response):
