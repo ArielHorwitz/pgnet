@@ -16,7 +16,7 @@ from .util import (
     DEFAULT_PORT,
     DisconnectedError,
     Status,
-    REQUEST,
+    Request,
 )
 
 
@@ -194,7 +194,7 @@ class Client:
 
     def get_game_dir(self, callback: Callable, /):
         """Get the games directory from the server and pass the response to callback."""
-        self.send(Packet(REQUEST.GAME_DIR), callback, do_next=True)
+        self.send(Packet(Request.GAME_DIR), callback, do_next=True)
 
     def create_game(
         self,
@@ -208,7 +208,7 @@ class Client:
         payload = dict(name=name)
         if password:
             payload["password"] = password
-        self.send(Packet(REQUEST.CREATE_GAME, payload), callback, do_next=True)
+        self.send(Packet(Request.CREATE_GAME, payload), callback, do_next=True)
 
     def join_game(
         self,
@@ -222,7 +222,7 @@ class Client:
         payload = dict(name=name)
         if password:
             payload["password"] = password
-        self.send(Packet(REQUEST.JOIN_GAME, payload), callback, do_next=True)
+        self.send(Packet(Request.JOIN_GAME, payload), callback, do_next=True)
 
     def leave_game(
         self,
@@ -230,7 +230,7 @@ class Client:
         callback: Optional[ResponseCallback] = None,
     ):
         """Request from the server to leave the game."""
-        self.send(Packet(REQUEST.LEAVE_GAME), callback, do_next=True)
+        self.send(Packet(Request.LEAVE_GAME), callback, do_next=True)
 
     def send(
         self,
@@ -409,7 +409,7 @@ class Client:
         while True:
             await asyncio.sleep(self._heartbeat_interval)
             if self.connected and self.game:
-                packet = Packet(REQUEST.HEARTBEAT_UPDATE, self.heartbeat_payload())
+                packet = Packet(Request.HEARTBEAT_UPDATE, self.heartbeat_payload())
                 self.send(packet, self.on_heartbeat)
 
     async def _handle_user_connection(self, connection: ClientConnection):

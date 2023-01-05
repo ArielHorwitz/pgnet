@@ -19,14 +19,17 @@ ADMIN_USERNAME = "admin"
 DEFAULT_ADMIN_PASSWORD = "localhostadmin"
 
 
-class REQUEST:
+class Request:
     """Strings used as a message in `Packet` for common requests.
 
     It is recommended to use the `pgnet.Client` API instead of these. `Game` classes
     should avoid using the string values here as messages in a `Packet` - such packets
     will be specially handled by the server.
+
+    In Python 3.11, this should be an `enum.StrEnum`.
     """
 
+    # Normal requests
     GAME_DIR: str = "__pgnet__.game_dir"
     """Request the games directory."""
     JOIN_GAME: str = "__pgnet__.join_game"
@@ -37,6 +40,24 @@ class REQUEST:
     """Request to create and join a game."""
     HEARTBEAT_UPDATE: str = "__pgnet__.heartbeat_update"
     """Request a heartbeat update from the game."""
+
+    # Admin requests
+    SHUTDOWN: str = "__pgnet__.shutdown"
+    """Shutdown the server."""
+    REGISTRATION: str = "__pgnet__.set_registration"
+    """Configure registration."""
+    KICK_USER: str = "__pgnet__.kick_user"
+    """Kick a username."""
+    DESTROY_GAME: str = "__pgnet__.destroy_game"
+    """Destroy a game."""
+    SAVE: str = "__pgnet__.save"
+    """Save server data to disk."""
+    VERBOSE: str = "__pgnet__.set_verbose"
+    """Configure logging verbosity."""
+    DEBUG: str = "__pgnet__.debug"
+    """Get debug info."""
+    SLEEP: str = "__pgnet__.sleep"
+    """Block entire server."""
 
 
 @enum.unique
@@ -350,7 +371,7 @@ class Game:
         Most use cases should override `Game.handle_game_packet` and
         `Game.handle_heartbeat` instead of this method.
         """
-        if packet.message == REQUEST.HEARTBEAT_UPDATE:
+        if packet.message == Request.HEARTBEAT_UPDATE:
             return self.handle_heartbeat(packet)
         return self.handle_game_packet(packet)
 
@@ -405,8 +426,8 @@ __all__ = (
     "Game",
     "Packet",
     "Response",
-    "REQUEST",
     "Status",
+    "Request",
     "Tunnel",
     "Key",
     "Connection",

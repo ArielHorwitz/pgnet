@@ -21,7 +21,7 @@ from .util import (
     Connection,
     Game,
     DEFAULT_PORT,
-    REQUEST,
+    Request,
     DEFAULT_ADMIN_PASSWORD,
     ADMIN_USERNAME,
     Status,
@@ -460,13 +460,13 @@ class Server:
 
     def _handle_packet(self, packet: Packet) -> Response:
         """Handle a packet from a logged in user."""
-        if packet.message == REQUEST.GAME_DIR:
+        if packet.message == Request.GAME_DIR:
             return self._game_dir_response()
-        if packet.message == REQUEST.JOIN_GAME:
+        if packet.message == Request.JOIN_GAME:
             return self._handle_join_game(packet)
-        if packet.message == REQUEST.LEAVE_GAME:
+        if packet.message == Request.LEAVE_GAME:
             return self._handle_leave_game(packet)
-        if packet.message == REQUEST.CREATE_GAME:
+        if packet.message == Request.CREATE_GAME:
             return self._handle_create_game(packet)
         if packet.username == ADMIN_USERNAME:
             response = self._handle_admin_packet(packet)
@@ -747,10 +747,10 @@ class Server:
     _canned_lobby_response = Response(
         "Please create/join a game.",
         dict(commands=[
-            REQUEST.GAME_DIR,
-            REQUEST.CREATE_GAME,
-            REQUEST.JOIN_GAME,
-            REQUEST.LEAVE_GAME,
+            Request.GAME_DIR,
+            Request.CREATE_GAME,
+            Request.JOIN_GAME,
+            Request.LEAVE_GAME,
         ]),
         status=Status.UNEXPECTED,
     )
