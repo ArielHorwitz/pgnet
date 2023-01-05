@@ -86,6 +86,10 @@ class DevCLI:
         try:
             parts = s.split(";")
             message = parts.pop(0)
+            if message.startswith(".."):
+                message = message[1:]
+            elif message.startswith("."):
+                message = f"__pgnet__{message}"
             payload = {}
             for p in parts:
                 key, value = cls._parse_part(p)
