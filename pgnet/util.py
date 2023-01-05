@@ -30,6 +30,8 @@ class Request:
     """
 
     # Normal requests
+    HELP: str = "__pgnet__.help"
+    """Request available commands."""
     GAME_DIR: str = "__pgnet__.game_dir"
     """Request the games directory."""
     JOIN_GAME: str = "__pgnet__.join_game"

@@ -4,8 +4,10 @@ from loguru import logger
 from typing import Optional, Callable, Type, Any
 import arrow
 import asyncio
+import functools
 import json
 from pathlib import Path
+import inspect
 import re
 import os
 import time
@@ -36,6 +38,55 @@ _re_whitespace = re.compile(r"\W")
 _re_non_alnum = re.compile(r"[^a-zA-Z\d\s]")
 _re_start_whitespace = re.compile(r"^\W")
 _re_end_whitespace = re.compile(r"\W$")
+
+
+def _get_packet_handler_args(f: Callable) -> set[str]:
+    sig = inspect.signature(f)
+    return {param for param in sig.parameters} - {"self", "packet"}
+
+
+def _user_packet_handler(*, admin: bool = False):
+    """Decorator that unpacks a packet payload into keyword arguments.
+
+    Checks that payload keys exist in arguments and values match the annotations. If
+    *admin* is True, will check that the packet is from the admin user.
+    """
+    def wrapper(f: Callable):
+        sig = inspect.signature(f)
+        expected_args = _get_packet_handler_args(f)
+        annotations = {arg: sig.parameters[arg].annotation for arg in expected_args}
+        for arg, annot in annotations.items():
+            if annot not in {int, str, bool, float}:
+                raise AssertionError(
+                    f"{arg!r} of {f} must be of JSON-able type, instead got: {annot}"
+                )
+
+        @functools.wraps(f)
+        def inner(server: "Server", packet: Packet):
+            # Check admin
+            if admin and packet.username != ADMIN_USERNAME:
+                return Response(
+                    f"{packet.message!r} requires admin privileges.",
+                    status=Status.UNEXPECTED,
+                )
+            # Compare payload to signature
+            for arg, value in packet.payload.items():
+                if arg not in expected_args:
+                    return Response(
+                        f"Unexpected argument {arg!r} for request {packet.message!r}",
+                        status=Status.UNEXPECTED,
+                    )
+                expected_type = annotations[arg]
+                if type(value) is not expected_type:
+                    m = (
+                        f"Expected argument type {expected_type} for argument {arg!r}."
+                        f" Instead got: {type(value)} {value!r}"
+                    )
+                    return Response(m, status=Status.UNEXPECTED)
+            # Finally call wrapped function
+            return f(server, packet, **packet.payload)
+        return inner
+    return wrapper
 
 
 def _check_name(
@@ -460,22 +511,16 @@ class Server:
 
     def _handle_packet(self, packet: Packet) -> Response:
         """Handle a packet from a logged in user."""
-        if packet.message == Request.GAME_DIR:
-            return self._game_dir_response()
-        if packet.message == Request.JOIN_GAME:
-            return self._handle_join_game(packet)
-        if packet.message == Request.LEAVE_GAME:
-            return self._handle_leave_game(packet)
-        if packet.message == Request.CREATE_GAME:
-            return self._handle_create_game(packet)
-        if packet.username == ADMIN_USERNAME:
-            response = self._handle_admin_packet(packet)
-            if response:
-                return response
+        # Find builtin handler
+        request_handler = self._request_handlers.get(packet.message)
+        if request_handler:
+            return request_handler(self, packet)
+        # Find game handler
         game_name: Optional[str] = self._connections[packet.username].game
-        if not game_name:
-            return self._canned_lobby_response
-        return self._handle_game_packet(packet, game_name)
+        if game_name:
+            return self._handle_game_packet(packet, game_name)
+        # No handler found - not in game and not a builtin request
+        return self._canned_lobby_response
 
     def _remove_user_from_game(self, username: str):
         """Remove user from game and delete the game if expired."""
@@ -489,7 +534,8 @@ class Server:
             del self._games[game.name]
         logger.debug(f"User {username!r} removed from {game}")
 
-    def _game_dir_response(self) -> Response:
+    @_user_packet_handler()
+    def _handle_game_dir(self, packet: Packet) -> Response:
         """Create a Response with dictionary of games details."""
         games_dict = {}
         for name, game in self._games.items():
@@ -498,7 +544,7 @@ class Server:
                 users=len(game.connected_users),
                 password_protected=game.password_protected,
             )
-        return Response("See payload for games list.", dict(games=games_dict))
+        return Response("See payload for games directory.", dict(games=games_dict))
 
     def _create_game(
         self,
@@ -523,55 +569,76 @@ class Server:
             del self._games[game_name]
         logger.debug(f"Destroyed game: {game_name!r}")
 
-    def _handle_join_game(self, packet: Packet) -> Response:
-        """Handle a request to join the game specified in the payload."""
+    @_user_packet_handler()
+    def _handle_join_game(
+        self,
+        packet: Packet,
+        /,
+        *,
+        name: str = "",
+    ) -> Response:
+        """Handle a request to join a game."""
+        game_name = name
         connection = self._connections[packet.username]
         current_name: Optional[str] = connection.game
         if current_name:
             return Response("Must leave game first.", status=Status.UNEXPECTED)
-        new_name: Optional[str] = packet.payload.get("name")
-        if not new_name:
+        if not game_name:
             return Response("Please specify a game name.", status=Status.UNEXPECTED)
-        if new_name == current_name:
+        if game_name == current_name:
             return Response("Already in game.", status=Status.UNEXPECTED)
-        game = self._games.get(new_name)
+        game = self._games.get(game_name)
         if not game:
             return self._handle_create_game(packet)
         password = packet.payload.get("password", "")
         fail = game.add_user(packet.username, password)
         if fail:
             return Response(f"Failed to join game: {fail}", status=Status.UNEXPECTED)
-        connection.game = new_name
+        connection.game = game_name
         logger.debug(f"User {packet.username!r} joined: {game}")
-        return Response("Joined game.", dict(heartbeat_rate=game.heartbeat_rate))
+        return Response(
+            f"Joined game: {game_name!r}.",
+            dict(heartbeat_rate=game.heartbeat_rate),
+        )
 
+    @_user_packet_handler()
     def _handle_leave_game(self, packet: Packet) -> Response:
         """Handle a request to leave the game."""
-        name: Optional[str] = self._connections[packet.username].game
-        if not name:
+        game_name: Optional[str] = self._connections[packet.username].game
+        if not game_name:
             return Response("Not in game.", status=Status.UNEXPECTED)
         self._remove_user_from_game(packet.username)
-        logger.debug(f"User {packet.username!r} left game: {name!r}")
-        return Response("Left game.")
+        logger.debug(f"User {packet.username!r} left game: {game_name!r}")
+        return Response(f"Left game: {game_name!r}.")
 
-    def _handle_create_game(self, packet: Packet) -> Response:
+    @_user_packet_handler()
+    def _handle_create_game(
+        self,
+        packet: Packet,
+        /,
+        *,
+        name: str = "",
+        password: str = "",
+    ) -> Response:
         """Handle request to create a new game specified in the payload."""
+        game_name = name
         connection = self._connections[packet.username]
         current_game = connection.game
         if current_game:
             return Response("Must leave game first.", status=Status.UNEXPECTED)
-        game_name = packet.payload.get("name")
         if not is_gamename_allowed(game_name):
             return Response("Game name not allowed.", status=Status.UNEXPECTED)
         if game_name in self._games:
             return Response("Game name already exists.", status=Status.UNEXPECTED)
-        password = packet.payload.get("password", "")
         game = self._create_game(game_name, password)
         fail = game.add_user(packet.username, password)
         assert not fail
         connection.game = game_name
         logger.debug(f"User {packet.username!r} created game: {game}")
-        return Response("Created new game.", dict(heartbeat_rate=game.heartbeat_rate))
+        return Response(
+            f"Created new game: {game_name!r}.",
+            dict(heartbeat_rate=game.heartbeat_rate),
+        )
 
     def _handle_game_packet(self, packet: Packet, game_name: str) -> Response:
         """Routes a packet from a logged in user to the game's packet handler.
@@ -587,76 +654,80 @@ class Server:
             response.disconnecting = False
         return response
 
-    def _handle_admin_packet(self, packet: Packet) -> Optional[Response]:
-        """Handle packets from the admin.
-
-        The packet message is compared to methods of the class in the format
-        of `_admin_commandname`.
-        """
-        admin_command = f"_admin_{packet.message}"
-        if hasattr(self, admin_command):
-            admin_handler = getattr(self, admin_command)
-            return admin_handler(packet)
-        return None
+    @_user_packet_handler()
+    def _handle_help(self, packet: Packet) -> Response:
+        requests = []
+        for name, f in self._request_handlers.items():
+            name = name.removeprefix("__pgnet__.")
+            args = ", ".join(repr(arg) for arg in _get_packet_handler_args(f))
+            requests.append(f"{name}({args})")
+        return Response("See payload for requests.", dict(requests=requests))
 
     # Admin commands
+    @_user_packet_handler(admin=True)
     def _admin_shutdown(self, packet: Packet) -> Response:
         """Shutdown the server."""
         self.shutdown()
         return Response("Shutting down...")
 
-    def _admin_reboot(self, packet: Packet) -> Response:
-        """Reboot the server."""
-        self.shutdown(-1)
-        return Response("Attempting to reboot...")
-
-    def _admin_help(self, packet: Packet) -> Response:
-        """Return available admin commands."""
-        commands = []
-        for attribute in dir(self):
-            if attribute.startswith("_admin_"):
-                commands.append(str(attribute)[len("_admin_"):])
-        commands = ", ".join(commands)
-        help = f"Commands: {commands}"
-        return Response(help)
-
-    def _admin_register(self, packet: Packet) -> Response:
-        """Toggle registration.
-
-        Pass nothing to toggle, or "set" parameter in payload to enable/disable.
-        """
-        set_as = bool(packet.payload.get("set", not self.registration_enabled))
+    @_user_packet_handler(admin=True)
+    def _admin_register(
+        self,
+        packet: Packet,
+        /,
+        *,
+        set_as: bool = False,
+    ) -> Response:
+        """Set user registration."""
         self.registration_enabled = set_as
         return Response(f"Registration enabled: {set_as}")
 
-    def _admin_kick(self, packet: Packet) -> Response:
-        """The "username" in payload will get kicked."""
-        username = packet.payload.get("username", "")
+    @_user_packet_handler(admin=True)
+    def _admin_kick(
+        self,
+        packet: Packet,
+        /,
+        *,
+        username: str = ""
+    ) -> Response:
+        """Kick a user by name."""
         self.kick_username(username)
         return Response(f"Kicked username {username!r}")
 
-    def _admin_destroy(self, packet: Packet) -> Response:
-        """Destroy the game specified in payload."""
-        game_name = packet.payload.get("name", "")
+    @_user_packet_handler(admin=True)
+    def _admin_destroy_game(
+        self,
+        packet: Packet,
+        /,
+        *,
+        name: str = "",
+    ) -> Response:
+        """Destroy a game by name."""
+        game_name = name
         if game_name not in self._games:
             return Response(f"No such game: {game_name!r}", status=Status.UNEXPECTED)
         self._destroy_game(game_name)
         return Response(f"Destroyed game: {game_name!r}")
 
+    @_user_packet_handler(admin=True)
     def _admin_save(self, packet: Packet) -> Response:
         """Save all server data to file."""
         success = self._save_to_disk()
         return Response(f"Saved {success=} server data to disk: {self._save_file}")
 
-    def _admin_verbose(self, packet: Packet) -> Response:
-        """Toggle verbose logging.
-
-        Pass nothing to toggle, or "set" parameter in payload to enable/disable.
-        """
-        set_as = bool(packet.payload.get("set", not self.verbose_logging))
+    @_user_packet_handler(admin=True)
+    def _admin_verbose(
+        self,
+        packet: Packet,
+        /,
+        *,
+        set_as: bool = False,
+    ) -> Response:
+        """Set verbose logging."""
         self.verbose_logging = set_as
         return Response(f"Verbose logging enabled: {set_as}")
 
+    @_user_packet_handler(admin=True)
     def _admin_debug(self, packet: Packet) -> Response:
         """Return debugging info."""
         non_kicked = set(self._users.keys()) - self._kicked_users
@@ -674,16 +745,16 @@ class Server:
         ])
         return Response("Debug", dict(debug=debug))
 
-    def _admin_sleep(self, packet: Packet) -> Response:
+    @_user_packet_handler(admin=True)
+    def _admin_sleep(self, packet: Packet, /, *, seconds: float = 1) -> Response:
         """Simulate slow response by blocking for the time specified in payload.
 
         Warning: this actually blocks the entire server. Time is capped at 5 seconds.
         """
         max_sleep = 5
-        s = int(packet.payload.get("time") or 1)
-        s = min(max_sleep, s)
-        time.sleep(s)
-        return Response(f"Slept for {s} seconds")
+        seconds = min(max_sleep, seconds)
+        time.sleep(seconds)
+        return Response(f"Slept for {seconds} seconds")
 
     def _save_to_disk(self) -> bool:
         """Save all data to disk."""
@@ -763,6 +834,22 @@ class Server:
             f" serving {address}:{self._port}"
             f" @ {id(self):x}>"
         )
+
+    _request_handlers = {
+        Request.HELP: _handle_help,
+        Request.GAME_DIR: _handle_game_dir,
+        Request.CREATE_GAME: _handle_create_game,
+        Request.JOIN_GAME: _handle_join_game,
+        Request.LEAVE_GAME: _handle_leave_game,
+        Request.SHUTDOWN: _admin_shutdown,
+        Request.REGISTRATION: _admin_register,
+        Request.KICK_USER: _admin_kick,
+        Request.DESTROY_GAME: _admin_destroy_game,
+        Request.SAVE: _admin_save,
+        Request.VERBOSE: _admin_verbose,
+        Request.DEBUG: _admin_debug,
+        Request.SLEEP: _admin_sleep,
+    }
 
 
 __all__ = (
