@@ -509,6 +509,13 @@ class Server:
             if response.disconnecting:
                 raise DisconnectedError(response.message)
 
+    _canned_response_payload = dict(commands=[
+        Request.GAME_DIR,
+        Request.CREATE_GAME,
+        Request.JOIN_GAME,
+        Request.LEAVE_GAME,
+    ])
+
     def _handle_packet(self, packet: Packet) -> Response:
         """Handle a packet from a logged in user."""
         # Find builtin handler
@@ -520,7 +527,11 @@ class Server:
         if game_name:
             return self._handle_game_packet(packet, game_name)
         # No handler found - not in game and not a builtin request
-        return self._canned_lobby_response
+        return Response(
+            "Please create/join a game.",
+            self._canned_response_payload | dict(packet=packet.debug_repr),
+            status=Status.UNEXPECTED,
+        )
 
     def _remove_user_from_game(self, username: str):
         """Remove user from game and delete the game if expired."""
@@ -814,17 +825,6 @@ class Server:
         self._kicked_users |= set(data["kicked_users"])
         self.registration_enabled = data["registration"]
         logger.debug("Loading disk data complete.")
-
-    _canned_lobby_response = Response(
-        "Please create/join a game.",
-        dict(commands=[
-            Request.GAME_DIR,
-            Request.CREATE_GAME,
-            Request.JOIN_GAME,
-            Request.LEAVE_GAME,
-        ]),
-        status=Status.UNEXPECTED,
-    )
 
     def __repr__(self):
         """Object repr."""
