@@ -115,7 +115,7 @@ class Client:
         username: str,
         password: str = "",
         port: int = DEFAULT_PORT,
-        server_factory: Callable[[Any], Server] = Server,
+        server_factory: Optional[Callable[[Any], Server]] = None,
     ) -> "Client":
         """Create a client that uses its own local server. See also `Client.remote`.
 
@@ -127,9 +127,11 @@ class Client:
             password: The user's password.
             port: Server port number.
             server_factory: If provided, will be used to create the local server. Must
-                accept the same arguments as `pgnet.Server`. This is useful for using a
-                server subclass or to pass custom arguments to the local server.
+                accept the same arguments as `pgnet.Server` (default). This is useful
+                for using a server subclass or to pass custom arguments to the local
+                server.
         """
+        server_factory = server_factory or Server
         server = server_factory(
             game,
             listen_globally=False,
