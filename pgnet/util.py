@@ -16,7 +16,7 @@ from nacl.encoding import Base64Encoder
 
 DEFAULT_PORT = 38929
 ADMIN_USERNAME = "admin"
-DEFAULT_ADMIN_PASSWORD = "localhostadmin"
+DEFAULT_ADMIN_PASSWORD = "admin"
 
 
 class Request:
