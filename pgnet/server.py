@@ -40,9 +40,12 @@ _re_start_whitespace = re.compile(r"^\W")
 _re_end_whitespace = re.compile(r"\W$")
 
 
-def _get_packet_handler_args(f: Callable) -> set[str]:
-    sig = inspect.signature(f)
-    return {param for param in sig.parameters} - {"self", "packet"}
+def _get_packet_handler_params(f: Callable) -> set[str]:
+    return {
+        name: param
+        for name, param in inspect.signature(f).parameters.items()
+        if name not in {"self", "packet"}
+    }
 
 
 def _user_packet_handler(*, admin: bool = False):
@@ -52,13 +55,12 @@ def _user_packet_handler(*, admin: bool = False):
     *admin* is True, will check that the packet is from the admin user.
     """
     def wrapper(f: Callable):
-        sig = inspect.signature(f)
-        expected_args = _get_packet_handler_args(f)
-        annotations = {arg: sig.parameters[arg].annotation for arg in expected_args}
-        for arg, annot in annotations.items():
-            if annot not in {int, str, bool, float}:
+        params = _get_packet_handler_params(f)
+        for name, param in params.items():
+            if param.annotation not in {int, str, bool, float}:
                 raise AssertionError(
-                    f"{arg!r} of {f} must be of JSON-able type, instead got: {annot}"
+                    f"{name!r} of {f} must be of JSON-able type,"
+                    f" instead got: {param.annotation}"
                 )
 
         @functools.wraps(f)
@@ -71,12 +73,12 @@ def _user_packet_handler(*, admin: bool = False):
                 )
             # Compare payload to signature
             for arg, value in packet.payload.items():
-                if arg not in expected_args:
+                if arg not in params:
                     return Response(
                         f"Unexpected argument {arg!r} for request {packet.message!r}",
                         status=Status.UNEXPECTED,
                     )
-                expected_type = annotations[arg]
+                expected_type = params[arg].annotation
                 if type(value) is not expected_type:
                     m = (
                         f"Expected argument type {expected_type} for argument {arg!r}."
@@ -667,12 +669,13 @@ class Server:
 
     @_user_packet_handler()
     def _handle_help(self, packet: Packet) -> Response:
-        requests = []
+        requests = dict()
         for name, f in self._request_handlers.items():
-            name = name.removeprefix("__pgnet__.")
-            args = ", ".join(repr(arg) for arg in _get_packet_handler_args(f))
-            requests.append(f"{name}({args})")
-        return Response("See payload for requests.", dict(requests=requests))
+            requests[name] = {
+                name: param.annotation.__name__
+                for name, param in _get_packet_handler_params(f).items()
+            }
+        return Response("See payload for requests.", requests)
 
     # Admin commands
     @_user_packet_handler(admin=True)
