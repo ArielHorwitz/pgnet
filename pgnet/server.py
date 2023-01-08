@@ -844,14 +844,14 @@ class Server:
         Request.CREATE_GAME: _handle_create_game,
         Request.JOIN_GAME: _handle_join_game,
         Request.LEAVE_GAME: _handle_leave_game,
-        Request.SHUTDOWN: _admin_shutdown,
-        Request.REGISTRATION: _admin_register,
-        Request.KICK_USER: _admin_kick,
-        Request.DESTROY_GAME: _admin_destroy_game,
-        Request.SAVE: _admin_save,
-        Request.VERBOSE: _admin_verbose,
         Request.DEBUG: _admin_debug,
+        Request.SAVE: _admin_save,
+        Request.DESTROY_GAME: _admin_destroy_game,
+        Request.KICK_USER: _admin_kick,
+        Request.REGISTRATION: _admin_register,
+        Request.VERBOSE: _admin_verbose,
         Request.SLEEP: _admin_sleep,
+        Request.SHUTDOWN: _admin_shutdown,
     }
 
 
