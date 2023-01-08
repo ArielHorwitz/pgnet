@@ -287,7 +287,9 @@ class Server:
             save_file: Location of file to save and load server sessions.
         """
         if listen_globally and not admin_password:
-            raise RuntimeError("Cannot listen globally without admin password.")
+            logger.warning(
+                "Created server that listens globally without admin password."
+            )
         admin_password = admin_password or DEFAULT_ADMIN_PASSWORD
         self._key: Key = Key()
         self._stop: Optional[asyncio.Future] = None
