@@ -741,20 +741,20 @@ class Server:
     @_user_packet_handler(admin=True)
     def _admin_debug(self, packet: Packet) -> Response:
         """Return debugging info."""
+        games = [str(game) for name, game in sorted(self._games.items())]
+        connected_users = [str(conn) for u, conn in sorted(self._connections.items())]
         non_kicked = set(self._users.keys()) - self._kicked_users
-        debug = "\n".join([
-            packet.debug_repr,
-            "Kicked users:",
-            *(f" -- {u}" for u in sorted(self._kicked_users)),
-            "All users:",
-            *(f" -- {u}" for u in sorted(non_kicked)),
-            "Connected users:",
-            *(f"  {conn}" for u, conn in sorted(self._connections.items())),
-            "Games:",
-            *(f"  {game}" for name, game in sorted(self._games.items())),
-            f"Pubkey: {self.pubkey}",
-        ])
-        return Response("Debug", dict(debug=debug))
+        all_users = sorted(non_kicked)
+        kicked_users = sorted(self._kicked_users)
+        payload = dict(
+            packet=packet.debug_repr,
+            pubkey=self.pubkey,
+            games=games,
+            connected_users=connected_users,
+            all_users=all_users,
+            kicked_users=kicked_users,
+        )
+        return Response("Debug", payload)
 
     @_user_packet_handler(admin=True)
     def _admin_sleep(self, packet: Packet, /, *, seconds: float = 1) -> Response:
