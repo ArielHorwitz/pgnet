@@ -511,13 +511,6 @@ class Server:
             if response.disconnecting:
                 raise DisconnectedError(response.message)
 
-    _canned_response_payload = dict(commands=[
-        Request.GAME_DIR,
-        Request.CREATE_GAME,
-        Request.JOIN_GAME,
-        Request.LEAVE_GAME,
-    ])
-
     def _handle_packet(self, packet: Packet) -> Response:
         """Handle a packet from a logged in user."""
         # Find builtin handler
@@ -853,6 +846,7 @@ class Server:
         Request.SLEEP: _admin_sleep,
         Request.SHUTDOWN: _admin_shutdown,
     }
+    _canned_response_payload = dict(commands=list(_request_handlers.keys()))
 
 
 __all__ = (
