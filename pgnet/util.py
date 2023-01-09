@@ -410,6 +410,13 @@ class Game:
         """
         return ""
 
+    def get_lobby_info(self) -> str:
+        """Override this method to post public game info in lobby.
+
+        This will be used to give users more information about a game before joining.
+        """
+        return ""
+
     def update(self):
         """Called on an interval by the server.
 

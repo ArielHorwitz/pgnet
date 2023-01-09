@@ -228,6 +228,10 @@ class LobbyGame:
             return self.game.get_save_string()
         return None
 
+    def get_lobby_info(self) -> str:
+        """Called by the server to get game info."""
+        return self.game.get_lobby_info()
+
     @property
     def expired(self) -> bool:
         """If the game is empty and not persistent."""
@@ -582,6 +586,7 @@ class Server:
                 name=game.name,
                 users=len(game.connected_users),
                 password_protected=game.password_protected,
+                info=game.get_lobby_info(),
             )
         return Response("See payload for games directory.", dict(games=games_dict))
 
