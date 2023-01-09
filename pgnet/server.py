@@ -298,7 +298,7 @@ class Server:
         self._register_user(ADMIN_USERNAME, admin_password)
         self._games: dict[str, LobbyGame] = {}
         self._connections: dict[str, Optional[UserConnection]] = {}
-        self._kicked_users: set[str] = set()
+        self._deleted_users: set[str] = set()
         self._game_cls: Type[Game] = game
         self._save_file: Optional[Path] = None if save_file is None else Path(save_file)
         self._address: str = "" if listen_globally else "localhost"
@@ -352,12 +352,15 @@ class Server:
         if self._stop and not self._stop.done():
             self._stop.set_result(result)
 
-    def kick_username(self, username: str):
-        """Kick and blacklist a given username from the server."""
+    def delete_user(self, username: str):
+        """Disconnect and delete a given username from the server."""
         if username == ADMIN_USERNAME:
-            logger.warning("Cannot kick admin.")
+            logger.warning("Cannot delete admin.")
             return
-        self._kicked_users.add(username)
+        if username in self._connections:
+            self._deleted_users.add(username)
+        else:
+            self._delete_user(username)
 
     @property
     def pubkey(self) -> str:
@@ -395,6 +398,8 @@ class Server:
         finally:
             logger.info(f"Closed connection: {connection}")
             self._remove_user_connection(connection)
+            if connection.username in self._users:
+                self._delete_user(connection.username)
 
     async def _handle_handshake(self, connection: UserConnection):
         """Handle a new connection's handshake sequence. Modifies the connection object.
@@ -437,8 +442,8 @@ class Server:
         """Return failure reason or None."""
         if not username:
             return "Missing non-empty username."
-        if username in self._kicked_users:
-            return "Username kicked."
+        if username in self._deleted_users:
+            return "User deleted."
         if username in self._connections:
             return "Username already connected."
         if username not in self._users:
@@ -499,8 +504,8 @@ class Server:
             do_log = self.verbose_logging
             if do_log:
                 logger.debug(packet)
-            if username in self._kicked_users:
-                response = Response("Kicked.", disconnecting=True)
+            if username in self._deleted_users:
+                response = Response("User deleted.", disconnecting=True)
             else:
                 response: Response = self._handle_packet(packet)
             if do_log:
@@ -541,6 +546,13 @@ class Server:
         if game.expired:
             del self._games[game.name]
         logger.debug(f"User {username!r} removed from {game}")
+
+    def _delete_user(self, username: str):
+        assert username in self._users and username not in self._connections
+        del self._users[username]
+        if username in self._deleted_users:
+            self._deleted_users.remove(username)
+        logger.info(f"Deleted {username=}")
 
     @_user_packet_handler()
     def _handle_game_dir(self, packet: Packet) -> Response:
@@ -692,16 +704,18 @@ class Server:
         return Response(f"Registration enabled: {set_as}")
 
     @_user_packet_handler(admin=True)
-    def _admin_kick(
+    def _admin_delete_user(
         self,
         packet: Packet,
         /,
         *,
         username: str = ""
     ) -> Response:
-        """Kick a user by name."""
-        self.kick_username(username)
-        return Response(f"Kicked username {username!r}")
+        """Delete a user by name."""
+        if username not in self._users:
+            return Response(f"No such username {username!r}")
+        self.delete_user(username)
+        return Response(f"Requested delete user {username!r}")
 
     @_user_packet_handler(admin=True)
     def _admin_destroy_game(
@@ -741,16 +755,13 @@ class Server:
         """Return debugging info."""
         games = [str(game) for name, game in sorted(self._games.items())]
         connected_users = [str(conn) for u, conn in sorted(self._connections.items())]
-        non_kicked = set(self._users.keys()) - self._kicked_users
-        all_users = sorted(non_kicked)
-        kicked_users = sorted(self._kicked_users)
+        all_users = sorted(self._users.keys())
         payload = dict(
             packet=packet.debug_repr,
             pubkey=self.pubkey,
             games=games,
             connected_users=connected_users,
             all_users=all_users,
-            kicked_users=kicked_users,
         )
         return Response("Debug", payload)
 
@@ -785,7 +796,6 @@ class Server:
         ]
         data = dict(
             users=users,
-            kicked_users=list(self._kicked_users),
             games=game_data,
             registration=self.registration_enabled,
         )
@@ -820,7 +830,6 @@ class Server:
                 logger.warning(f"Loaded disallowed {game_name=}")
             self._create_game(game_name, game["password"], game["data"])
             logger.debug(f"Loaded game: {self._games[game_name]!r}")
-        self._kicked_users |= set(data["kicked_users"])
         self.registration_enabled = data["registration"]
         logger.debug("Loading disk data complete.")
 
@@ -842,7 +851,7 @@ class Server:
         Request.DEBUG: _admin_debug,
         Request.SAVE: _admin_save,
         Request.DESTROY_GAME: _admin_destroy_game,
-        Request.KICK_USER: _admin_kick,
+        Request.DELETE_USER: _admin_delete_user,
         Request.REGISTRATION: _admin_register,
         Request.VERBOSE: _admin_verbose,
         Request.SLEEP: _admin_sleep,

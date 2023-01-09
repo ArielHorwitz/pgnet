@@ -48,7 +48,7 @@ class Request:
     """Shutdown the server."""
     REGISTRATION: str = "__pgnet__.set_registration"
     """Configure registration."""
-    KICK_USER: str = "__pgnet__.kick_user"
+    DELETE_USER: str = "__pgnet__.delete_user"
     """Kick a username."""
     DESTROY_GAME: str = "__pgnet__.destroy_game"
     """Destroy a game."""
