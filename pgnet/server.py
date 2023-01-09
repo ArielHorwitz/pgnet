@@ -299,6 +299,7 @@ class Server:
         self._games: dict[str, LobbyGame] = {}
         self._connections: dict[str, Optional[UserConnection]] = {}
         self._deleted_users: set[str] = set()
+        self._invite_codes: dict[str, str] = {}
         self._game_cls: Type[Game] = game
         self._save_file: Optional[Path] = None if save_file is None else Path(save_file)
         self._address: str = "" if listen_globally else "localhost"
@@ -398,7 +399,8 @@ class Server:
         finally:
             logger.info(f"Closed connection: {connection}")
             self._remove_user_connection(connection)
-            if connection.username in self._users:
+            username = connection.username
+            if username in self._users and username in self._deleted_users:
                 self._delete_user(connection.username)
 
     async def _handle_handshake(self, connection: UserConnection):
@@ -426,7 +428,8 @@ class Server:
         packet = await connection.recv()
         username = packet.payload.get("username")
         password = packet.payload.get("password", "")
-        fail = self._check_auth(username, password)
+        invite_code = packet.payload.get("invite_code", "")
+        fail = self._check_auth(username, password, invite_code)
         if fail:
             # Respond with problem and disconnect
             response = Response(fail, status=Status.BAD, disconnecting=True)
@@ -438,7 +441,12 @@ class Server:
             logger.warning(f"Authenticated as admin: {connection}")
         await connection.send(Response("Authenticated."))
 
-    def _check_auth(self, username: str, password: str) -> Optional[str]:
+    def _check_auth(
+        self,
+        username: str,
+        password: str,
+        invite_code: str,
+    ) -> Optional[str]:
         """Return failure reason or None."""
         if not username:
             return "Missing non-empty username."
@@ -447,23 +455,34 @@ class Server:
         if username in self._connections:
             return "Username already connected."
         if username not in self._users:
-            missing_password = self._require_user_password and not password
-            if (
-                self.registration_enabled
-                and is_username_allowed(username)
-                and not missing_password
-            ):
-                self._register_user(username, password)
-                return None
-            elif not self.registration_enabled:
-                return "Username not found, registration blocked."
-            elif missing_password:
-                return "User password required."
-            else:
-                return "Username not allowed."
+            return self._try_register_user(username, password, invite_code)
         user = self._users[username]
         if not user.compare_password(password):
             return "Incorrect password."
+        return None
+
+    def _try_register_user(
+        self,
+        username: str,
+        password: str,
+        invite_code: str,
+    ) -> Optional[str]:
+        """Return failure reason or None."""
+        if invite_code:
+            invite_username = self._invite_codes.get(invite_code)
+            wrong_code = invite_username is None
+            invite_valid = username == invite_username or invite_username == ""
+            if wrong_code or not invite_valid:
+                return "Incorrect username or invite code."
+        if not (self.registration_enabled or invite_code):
+            return "Registration blocked."
+        if self._require_user_password and not password:
+            return "User password required."
+        if not is_username_allowed(username):
+            return "Username not allowed."
+        self._register_user(username, password)
+        if invite_code:
+            del self._invite_codes[invite_code]
         return None
 
     def _register_user(self, username: str, password: str, /):
@@ -692,6 +711,19 @@ class Server:
         return Response("Shutting down...")
 
     @_user_packet_handler(admin=True)
+    def _admin_create_invite(
+        self,
+        packet: Packet,
+        /,
+        *,
+        username: str = "",
+    ) -> Response:
+        """Create an invite code. Can optionally by for a specific username."""
+        code = os.urandom(2).hex()
+        self._invite_codes[code] = username
+        return Response(f"Created invite code: {code}")
+
+    @_user_packet_handler(admin=True)
     def _admin_register(
         self,
         packet: Packet,
@@ -762,6 +794,10 @@ class Server:
             games=games,
             connected_users=connected_users,
             all_users=all_users,
+            registration=self.registration_enabled,
+            invite_codes=self._invite_codes,
+            deleted_users=list(self._deleted_users),
+            verbose=self.verbose_logging,
         )
         return Response("Debug", payload)
 
@@ -798,6 +834,7 @@ class Server:
             users=users,
             games=game_data,
             registration=self.registration_enabled,
+            invite_codes=self._invite_codes,
         )
         dumped = json.dumps(data, indent=4)
         self._save_file.parent.mkdir(parents=True, exist_ok=True)
@@ -830,6 +867,7 @@ class Server:
                 logger.warning(f"Loaded disallowed {game_name=}")
             self._create_game(game_name, game["password"], game["data"])
             logger.debug(f"Loaded game: {self._games[game_name]!r}")
+        self._invite_codes |= data["invite_codes"]
         self.registration_enabled = data["registration"]
         logger.debug("Loading disk data complete.")
 
@@ -850,6 +888,7 @@ class Server:
         Request.LEAVE_GAME: _handle_leave_game,
         Request.DEBUG: _admin_debug,
         Request.SAVE: _admin_save,
+        Request.CREATE_INVITE: _admin_create_invite,
         Request.DESTROY_GAME: _admin_destroy_game,
         Request.DELETE_USER: _admin_delete_user,
         Request.REGISTRATION: _admin_register,

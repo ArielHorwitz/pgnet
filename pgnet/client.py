@@ -83,6 +83,7 @@ class Client:
         address: str,
         username: str,
         password: str,
+        invite_code: str,
         port: int,
         server: Optional[Server],
         verify_server_pubkey: str,
@@ -102,6 +103,7 @@ class Client:
         # Connection details
         self._username = username
         self._password = password
+        self._invite_code = invite_code
         self._address = address
         self._port = port
         self._server = server
@@ -142,6 +144,7 @@ class Client:
             address="localhost",
             username=username,
             password=password,
+            invite_code="",
             port=port,
             server=server,
             verify_server_pubkey=server.pubkey,
@@ -154,6 +157,7 @@ class Client:
         address: str,
         username: str,
         password: str = "",
+        invite_code: str = "",
         port: int = DEFAULT_PORT,
         verify_server_pubkey: str = "",
     ) -> "Client":
@@ -163,6 +167,7 @@ class Client:
             address: Server IP address.
             username: The user's username.
             password: The user's password.
+            invite_code: An invite code for creating a new user.
             port: Server port number.
             verify_server_pubkey: If provided, will compare against the
                 `pgnet.Server.pubkey` of the server and disconnect if they do not match.
@@ -171,6 +176,7 @@ class Client:
             address=address,
             username=username,
             password=password,
+            invite_code=invite_code,
             port=port,
             server=None,
             verify_server_pubkey=verify_server_pubkey,
@@ -394,7 +400,11 @@ class Client:
         connection.tunnel = self._key.get_tunnel(pubkey)
         logger.debug(f"Assigned tunnel: {connection}")
         # Authenticate
-        handshake_payload = dict(username=self._username, password=self._password)
+        handshake_payload = dict(
+            username=self._username,
+            password=self._password,
+            invite_code=self._invite_code,
+        )
         packet = Packet("handshake", handshake_payload)
         response = await connection.send_recv(packet)
         if response.status != Status.OK:
