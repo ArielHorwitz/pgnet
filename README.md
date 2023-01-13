@@ -13,14 +13,9 @@ PGNet is a server-client framework for games written in Python.
 
 ## Limitation
 * No concurrency beyond async on a single thread (bad for CPU-intensive games)
-* Client initiated communication (server responds to client)
+* Client initiated communication (server responds to client, best for turn-based games)
 * No tests
 
 
-## Install
-
-```bash
-pip install git+ssh://git@github.com/ArielHorwitz/pgnet.git
-```
-
-See documentation for examples and API reference.
+## Documentation
+Documentation is available via the [MouseFox project](https://ariel.ninja/mousefox).

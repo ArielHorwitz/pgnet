@@ -1,5 +1,10 @@
 """.. include:: ../README.md
 
+# Install
+```bash
+pip install git+https://github.com/ArielHorwitz/pgnet.git
+```
+
 # Getting started
 Starting "locally" is recommended since the client will create its own server. It
 behaves the same, but faster and with no configuration required. This is enough for
